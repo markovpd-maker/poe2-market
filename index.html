@@ -1,0 +1,1475 @@
+<!DOCTYPE html>
+<script type="application/json" id="cowork-artifact-meta">
+{
+  "name": "Poe2 Market Runes",
+  "schemaVersion": 1,
+  "description": "PoE2 Market Dashboard для лиги Runes of Aldur. Данные из poe2scout: курсы валют в Divine, топ-10 флип, топ-10 долгосрочные вложения, портфель с биржевыми ордерами в exalted, блок Hinekora's Lock с графиком и вердиктом (2 шт.), крафт-арбитраж (Origin Core, Perfect Runes).",
+  "mcpTools": [
+    "mcp__poe2scout-mcp__get_currency_items"
+  ],
+  "mcpServerNames": [
+    "poe2scout-mcp"
+  ]
+}
+</script>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PoE2 Market — Runes of Aldur</title>
+<style>
+:root { color-scheme: light; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f4f0; color: #1a1a2e; font-size: 13px; }
+
+.header {
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+  color: #e0d5c0; padding: 11px 18px;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  border-bottom: 2px solid #c9a84c;
+}
+.header-title { font-size: 15px; font-weight: 700; white-space: nowrap; }
+.header-title span { color: #c9a84c; }
+.header-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.divine-rate-label { font-size: 11px; color: #9090a8; white-space: nowrap; }
+.divine-rate { color: #c9a84c; font-weight: 600; }
+.budget-wrap { display: flex; align-items: center; gap: 6px; background: #ffffff12; border: 1px solid #c9a84c44; border-radius: 6px; padding: 3px 10px; }
+.budget-wrap label { font-size: 11px; color: #c9a84c; white-space: nowrap; }
+.budget-input { width: 65px; background: transparent; border: none; outline: none; color: #ffd700; font-weight: 700; font-size: 13px; text-align: right; }
+.budget-unit { font-size: 11px; color: #c9a84c; }
+.btn-refresh { background: #c9a84c22; border: 1px solid #c9a84c55; color: #c9a84c; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 11px; transition: background .2s; white-space: nowrap; }
+.btn-refresh:hover { background: #c9a84c44; }
+.profile-sel { background: transparent; color: #ffd700; border: none; outline: none; font-size: 12px; font-weight: 600; max-width: 110px; }
+.profile-sel option { background: #1a1a2e; color: #ffd700; }
+
+.loading { text-align: center; padding: 60px 20px; color: #666; }
+.spinner { display: inline-block; width: 32px; height: 32px; border: 3px solid #ddd; border-top-color: #c9a84c; border-radius: 50%; animation: spin .8s linear infinite; margin-bottom: 12px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.error-msg { background: #fee; border: 1px solid #fcc; color: #c00; padding: 12px 16px; border-radius: 6px; margin: 16px; }
+
+.content { padding: 13px; display: flex; flex-direction: column; gap: 13px; }
+
+/* Hinekora */
+.hineroka-block { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); border: 1px solid #c9a84c55; border-radius: 10px; padding: 13px; color: #e0d5c0; }
+.hineroka-block h2 { color: #c9a84c; font-size: 13px; font-weight: 700; margin-bottom: 10px; display: flex; align-items: center; gap: 7px; }
+.hineroka-block h2 img { width: 22px; height: 22px; image-rendering: pixelated; }
+.hineroka-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; align-items: start; }
+.hst .label { font-size: 10px; color: #9090a8; text-transform: uppercase; letter-spacing: .4px; margin-bottom: 3px; }
+.hst .value { font-size: 18px; font-weight: 700; color: #ffd700; }
+.hst .sub { font-size: 11px; color: #c9a84c; margin-top: 2px; }
+.chg-up { color: #4caf50; font-size: 11px; }
+.chg-dn { color: #f44336; font-size: 11px; }
+.verdict-badge { padding: 7px 12px; border-radius: 8px; font-weight: 700; font-size: 13px; text-align: center; }
+.verdict-hold { background: #4caf5022; border: 1px solid #4caf5055; color: #4caf50; }
+.verdict-sell { background: #ff980022; border: 1px solid #ff980055; color: #ff9800; }
+.verdict-sub { font-size: 10px; color: #9090a8; margin-top: 4px; }
+.hineroka-chart-wrap { height: 105px; margin-top: 10px; position: relative; }
+
+/* Cards */
+.cards-row { display: grid; grid-template-columns: 1fr 1fr; gap: 13px; }
+@media (max-width: 760px) { .cards-row { grid-template-columns: 1fr; } .hineroka-grid { grid-template-columns: 1fr 1fr; } }
+.card { background: #fff; border: 1px solid #e0ddd8; border-radius: 10px; overflow: hidden; }
+.card-header { padding: 8px 13px; font-weight: 700; font-size: 13px; display: flex; align-items: center; gap: 6px; border-bottom: 1px solid #e0ddd8; flex-wrap: wrap; }
+.card-header.flip   { background: #fff8e1; color: #e65100; }
+.card-header.invest { background: #e8f5e9; color: #1b5e20; }
+.card-header.rates  { background: #e3f2fd; color: #0d47a1; }
+.badge { font-size: 10px; padding: 2px 7px; border-radius: 10px; margin-left: auto; font-weight: 600; }
+.badge-flip   { background: #ff6d00; color: #fff; }
+.badge-invest { background: #2e7d32; color: #fff; }
+.badge-rates  { background: #1565c0; color: #fff; }
+
+/* Category tabs */
+.cat-tabs { display: flex; gap: 4px; flex-wrap: wrap; padding: 7px 10px; border-bottom: 1px solid #e0ddd8; background: #fafafa; }
+.cat-tab { padding: 3px 9px; border-radius: 12px; font-size: 11px; cursor: pointer; border: 1px solid #ddd; background: #fff; color: #555; transition: all .15s; white-space: nowrap; }
+.cat-tab:hover { border-color: #aaa; color: #222; }
+.cat-tab.active-flip   { background: #ff6d00; border-color: #ff6d00; color: #fff; font-weight: 600; }
+.cat-tab.active-invest { background: #2e7d32; border-color: #2e7d32; color: #fff; font-weight: 600; }
+
+table { width: 100%; border-collapse: collapse; }
+th { padding: 5px 8px; text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: .4px; color: #888; background: #fafafa; border-bottom: 1px solid #eee; white-space: nowrap; }
+td { padding: 5px 8px; border-bottom: 1px solid #f0f0f0; vertical-align: middle; }
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: #fafaf8; }
+.item-name { font-weight: 600; font-size: 12px; color: #1a1a2e; }
+.item-cat  { font-size: 10px; color: #ccc; }
+.price-now  { font-weight: 700; color: #1a1a2e; font-size: 12px; }
+.bid-buy    { color: #1565c0; font-weight: 700; font-size: 12px; }
+.bid-sell   { color: #2e7d32; font-weight: 700; font-size: 12px; }
+.bid-sub    { font-size: 10px; color: #bbb; }
+.margin-good { color: #2e7d32; font-weight: 700; font-size: 12px; }
+.margin-ok   { color: #f57c00; font-weight: 700; font-size: 12px; }
+.margin-low  { color: #bbb; font-size: 12px; }
+.entry-good  { color: #2e7d32; font-size: 11px; font-weight: 600; }
+.entry-ok    { color: #f57c00; font-size: 11px; }
+.entry-bad   { color: #f44336; font-size: 11px; }
+.units-badge { background: #e3f2fd; color: #1565c0; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+.trend-up   { color: #2e7d32; font-weight: 600; font-size: 11px; }
+.trend-down { color: #c62828; font-weight: 600; font-size: 11px; }
+.trend-flat { color: #888; font-size: 11px; }
+.rank { color: #bbb; font-size: 11px; font-weight: 600; }
+.rank.top3 { color: #c9a84c; }
+.liq-low { color: #f44336; font-size: 10px; }
+
+.rates-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(125px, 1fr)); }
+.rate-item { padding: 7px 11px; border-bottom: 1px solid #f0f0f0; border-right: 1px solid #f0f0f0; }
+.rate-item .r-name { font-size: 11px; color: #555; margin-bottom: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rate-item .r-val   { font-size: 13px; font-weight: 700; color: #0d47a1; }
+.rate-item .r-change { font-size: 10px; }
+.no-data { padding: 14px; color: #aaa; text-align: center; font-size: 12px; }
+
+/* Portfolio */
+.portfolio-block { background: #fff; border: 1px solid #e0ddd8; border-radius: 10px; overflow: hidden; }
+.portfolio-block .card-header { background: linear-gradient(90deg,#1a1a2e,#16213e); color: #c9a84c; }
+.pf-split { display: flex; align-items: center; gap: 8px; padding: 8px 13px; border-bottom: 1px solid #f0f0f0; background: #fafafa; flex-wrap: wrap; }
+.pf-split label { font-size: 11px; color: #555; }
+.pf-slider { width: 120px; accent-color: #c9a84c; }
+.cur-btn { padding: 2px 9px; border-radius: 10px; font-size: 11px; cursor: pointer; border: 1px solid #ddd; background: #fff; color: #555; }
+.cur-btn:hover { border-color: #aaa; }
+.cur-btn.active { background: #1a1a2e; border-color: #1a1a2e; color: #ffd700; font-weight: 700; }
+.grid-warn { color: #f57c00; font-size: 10px; }
+.pf-flip-lbl  { color: #e65100; font-weight: 700; font-size: 11px; }
+.pf-invest-lbl { color: #2e7d32; font-weight: 700; font-size: 11px; }
+.pf-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 0; }
+@media (max-width: 760px) { .pf-cols { grid-template-columns: 1fr; } }
+.pf-col { border-right: 1px solid #f0f0f0; }
+.pf-col:last-child { border-right: none; }
+.pf-col-hdr { padding: 6px 13px; font-size: 11px; font-weight: 700; border-bottom: 1px solid #f0f0f0; display: flex; justify-content: space-between; align-items: center; }
+.pf-col-hdr.flip-hdr   { background: #fff8e1; color: #e65100; }
+.pf-col-hdr.invest-hdr { background: #e8f5e9; color: #1b5e20; }
+.pf-total { font-size: 11px; font-weight: 400; color: #888; }
+.pf-total span { font-weight: 700; }
+.pf-row { display: flex; align-items: center; gap: 8px; padding: 7px 13px; border-bottom: 1px solid #f8f8f8; }
+.pf-row:last-child { border-bottom: none; }
+.pf-num { font-size: 11px; color: #c9a84c; font-weight: 700; min-width: 16px; }
+.pf-info { flex: 1; min-width: 0; }
+.pf-name { font-size: 12px; font-weight: 600; color: #1a1a2e; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pf-detail { font-size: 10px; color: #aaa; margin-top: 1px; }
+.pf-alloc { text-align: right; min-width: 80px; }
+.pf-alloc .qty { font-size: 13px; font-weight: 700; color: #1a1a2e; }
+.pf-alloc .cost { font-size: 10px; color: #aaa; }
+.pf-alloc .profit { font-size: 11px; font-weight: 700; }
+.pf-profit-good { color: #2e7d32; }
+.pf-profit-ok   { color: #f57c00; }
+.pf-summary { display: flex; gap: 16px; padding: 8px 13px; background: #fafafa; border-top: 1px solid #f0f0f0; flex-wrap: wrap; }
+.pf-summary-item { font-size: 11px; color: #555; }
+.pf-summary-item span { font-weight: 700; color: #1a1a2e; }
+.pf-no-budget { padding: 20px; text-align: center; color: #aaa; font-size: 12px; }
+
+/* Main tabs */
+.main-tabs { display: flex; gap: 6px; padding: 10px 13px 0; }
+.main-tab { padding: 6px 16px; border-radius: 8px 8px 0 0; border: 1px solid #e0ddd8; border-bottom: none; background: #eceae5; color: #777; cursor: pointer; font-size: 13px; font-weight: 600; }
+.main-tab.active { background: #fff; color: #1a1a2e; }
+
+/* Price check */
+.pc-form { display: flex; gap: 8px; padding: 10px 13px; align-items: flex-start; border-bottom: 1px solid #f0f0f0; background: #fafafa; flex-wrap: wrap; }
+.pc-form textarea { flex: 1; min-width: 260px; height: 110px; font-family: ui-monospace, Consolas, monospace; font-size: 11px; padding: 8px; border: 1px solid #ddd; border-radius: 6px; resize: vertical; background: #fff; color: #1a1a2e; outline: none; }
+.pc-form textarea:focus { border-color: #00897b; }
+.pc-res { padding: 12px 13px; }
+.pc-prices { display: flex; gap: 14px; flex-wrap: wrap; margin: 8px 0; }
+.pc-price-box { background: #f5f4f0; border: 1px solid #e0ddd8; border-radius: 8px; padding: 8px 12px; }
+.pc-price-box .lbl { font-size: 10px; color: #888; text-transform: uppercase; letter-spacing: .4px; }
+.pc-price-box .val { font-size: 15px; font-weight: 700; color: #1a1a2e; }
+.pc-reason { font-size: 12px; color: #555; padding: 2px 0; }
+th.sort { cursor: pointer; user-select: none; }
+th.sort:hover { color: #333; }
+.verdict-neutral { background: #9e9e9e22; border: 1px solid #9e9e9e55; color: #616161; }
+
+/* Trade tracker */
+.tracker-block { background: #fff; border: 1px solid #e0ddd8; border-radius: 10px; overflow: hidden; }
+.tracker-block .card-header { background: #ede7f6; color: #311b92; }
+.tr-form { display: flex; gap: 6px; padding: 9px 13px; border-bottom: 1px solid #f0f0f0; background: #fafafa; flex-wrap: wrap; align-items: center; }
+.tr-form select, .tr-form input { padding: 4px 7px; border: 1px solid #ddd; border-radius: 5px; font-size: 12px; background: #fff; color: #1a1a2e; outline: none; }
+.tr-form select:focus, .tr-form input:focus { border-color: #7b1fa2; }
+.tr-item-inp { flex: 1; min-width: 160px; }
+.tr-btn { background: #7b1fa2; color: #fff; border: none; padding: 5px 14px; border-radius: 5px; cursor: pointer; font-size: 12px; font-weight: 600; }
+.tr-btn:hover { background: #6a1b9a; }
+.tr-err { color: #c62828; font-size: 11px; }
+.tr-side-buy  { color: #1565c0; font-weight: 700; }
+.tr-side-sell { color: #2e7d32; font-weight: 700; }
+.tr-del { background: none; border: none; color: #ccc; cursor: pointer; font-size: 13px; padding: 0 4px; }
+.tr-del:hover { color: #f44336; }
+.pnl-pos { color: #2e7d32; font-weight: 700; }
+.pnl-neg { color: #c62828; font-weight: 700; }
+.pnl-na  { color: #bbb; }
+
+/* Craft arbitrage */
+.craft-block { background: #fff; border: 1px solid #e0ddd8; border-radius: 10px; overflow: hidden; }
+.craft-block .card-header { padding: 8px 13px; font-weight: 700; font-size: 13px; display: flex; align-items: center; gap: 6px; border-bottom: 1px solid #e0ddd8; background: #f3e5f5; color: #4a148c; }
+.craft-note { font-size: 11px; color: #888; padding: 6px 13px; border-bottom: 1px solid #f0f0f0; background: #faf8ff; }
+.headroom-good { color: #2e7d32; font-weight: 700; font-size: 12px; }
+.headroom-ok   { color: #f57c00; font-weight: 700; font-size: 12px; }
+.headroom-low  { color: #bbb; font-size: 12px; }
+.badge-craft { background: #7b1fa2; color: #fff; }
+</style>
+</head>
+<body>
+<div class="header">
+  <div>
+    <div class="header-title">⚔️ PoE2 Market · <span>Runes of Aldur</span></div>
+    <div id="updated" style="font-size:10px;color:#9090a8;margin-top:1px;">Загружается...</div>
+  </div>
+  <div class="header-right">
+    <div class="budget-wrap" title="Профиль: отдельный стеш и журнал сделок">
+      <label>👤</label>
+      <select id="profile-sel" class="profile-sel" onchange="onProfileSel(this.value)"></select>
+      <span id="profile-new-wrap" style="display:none;align-items:center;gap:4px">
+        <input id="profile-new-inp" class="budget-input" style="width:90px;text-align:left" placeholder="имя профиля">
+        <button class="btn-refresh" onclick="createProfile()">ок</button>
+      </span>
+    </div>
+    <div class="budget-wrap" title="Свободные средства — суммируются в общий бюджет">
+      <label>💰</label>
+      <input class="budget-input" id="budget" type="number" min="0" step="1" placeholder="0" style="width:52px">
+      <span class="budget-unit">div</span>
+      <input class="budget-input" id="budget-ex" type="number" min="0" step="1" placeholder="0" style="width:52px">
+      <span class="budget-unit">ex</span>
+      <input class="budget-input" id="budget-c" type="number" min="0" step="1" placeholder="0" style="width:52px">
+      <span class="budget-unit">c</span>
+    </div>
+    <span class="divine-rate-label">1 div = <span class="divine-rate" id="divine-rate">...</span> ex · 1 c = <span class="divine-rate" id="chaos-rate">...</span> ex</span>
+    <button class="btn-refresh" onclick="loadAll()">↺ Обновить</button>
+  </div>
+</div>
+
+<div id="root">
+  <div class="loading"><div class="spinner"></div><br>Загружаем данные с poe2scout...</div>
+</div>
+
+<script>
+const LEAGUE = 'Runes of Aldur';
+let divinePrice = 132.1;
+let chaosPrice  = 12.2;
+let allValidItems = [];
+let marketByText  = {}; // Text -> item (все категории, для автоподстановки и рыночной цены)
+let flipCat   = 'all';
+let investCat = 'all';
+
+const CAT_LABELS = {
+  all:              'Все',
+  currency:         'Currency',
+  runes:            'Runes',
+  lineagesupportgems: 'Lineage Gems',
+  fragments:        'Fragments',
+  essences:         'Essences',
+  breach:           'Breach',
+  delirium:         'Delirium',
+  ritual:           'Omens',
+  abyss:            'Abyss',
+  verisium:         'Verisium',
+};
+
+const budgetEl   = document.getElementById('budget');
+const budgetExEl = document.getElementById('budget-ex');
+const budgetCEl  = document.getElementById('budget-c');
+const BUDGET_KEYS = [[budgetEl,'poe2_budget'],[budgetExEl,'poe2_budget_ex'],[budgetCEl,'poe2_budget_c']];
+BUDGET_KEYS.forEach(([el, key]) => {
+  el.value = localStorage.getItem(key) || '';
+  el.addEventListener('input', () => {
+    localStorage.setItem(key, el.value);
+    renderTables();
+    renderPortfolio();
+  });
+});
+/* ── Профили: отдельный стеш и журнал сделок на каждый ── */
+function getProfiles() {
+  try { const p = JSON.parse(localStorage.getItem('poe2_profiles') || 'null'); return Array.isArray(p) && p.length ? p : ['основной']; }
+  catch { return ['основной']; }
+}
+function saveProfiles(p) { localStorage.setItem('poe2_profiles', JSON.stringify(p)); }
+let activeProfile = localStorage.getItem('poe2_profile_active') || 'основной';
+// миграция данных, записанных до появления профилей
+if (!localStorage.getItem('poe2_profiles')) {
+  saveProfiles(['основной']);
+  const oldT = localStorage.getItem('poe2_trades');
+  const oldS = localStorage.getItem('poe2_stash');
+  if (oldT && !localStorage.getItem('poe2_trades__основной')) localStorage.setItem('poe2_trades__основной', oldT);
+  if (oldS && !localStorage.getItem('poe2_stash__основной'))  localStorage.setItem('poe2_stash__основной',  oldS);
+}
+function tradesKey() { return 'poe2_trades__' + activeProfile; }
+function stashKey()  { return 'poe2_stash__'  + activeProfile; }
+
+function refreshProfileSel() {
+  const sel = document.getElementById('profile-sel');
+  if (!sel) return;
+  sel.innerHTML = getProfiles().map(p =>
+    `<option value="${p.replace(/"/g,'&quot;')}" ${p===activeProfile?'selected':''}>${p}</option>`).join('')
+    + '<option value="__new__">➕ новый…</option>';
+}
+function onProfileSel(v) {
+  if (v === '__new__') {
+    document.getElementById('profile-new-wrap').style.display = 'flex';
+    document.getElementById('profile-sel').value = activeProfile;
+    document.getElementById('profile-new-inp').focus();
+  } else setProfile(v);
+}
+function createProfile() {
+  const inp = document.getElementById('profile-new-inp');
+  const name = (inp.value || '').trim().slice(0, 20);
+  if (!name || name === '__new__') return;
+  const ps = getProfiles();
+  if (!ps.includes(name)) { ps.push(name); saveProfiles(ps); }
+  inp.value = '';
+  document.getElementById('profile-new-wrap').style.display = 'none';
+  setProfile(name);
+}
+function setProfile(name) {
+  activeProfile = name;
+  localStorage.setItem('poe2_profile_active', name);
+  stashExpanded = new Set();
+  refreshProfileSel();
+  renderTracker(true);
+  renderStash();
+}
+
+// Общий бюджет в exalted: div + ex + chaos по текущим курсам
+function getBudgetEx() {
+  const d = parseFloat(budgetEl.value)   || 0;
+  const e = parseFloat(budgetExEl.value) || 0;
+  const c = parseFloat(budgetCEl.value)  || 0;
+  return d * divinePrice + e + c * chaosPrice;
+}
+function toDiv(ex) { return ex / divinePrice; }
+function fmtD(ex, dec=2) { return toDiv(ex).toFixed(dec) + ' div'; }
+function toC(ex) { return ex / chaosPrice; }
+function fmtC(ex, dec=1) { return toC(ex).toFixed(dec) + ' c'; }
+
+function safeLogs(logs) {
+  if (!Array.isArray(logs)) return [];
+  // PriceLogs приходят НОВЫЕ→СТАРЫЕ (проверено: [0] = сегодня)
+  return logs.filter(l => l && typeof l.Price === 'number' && l.Price > 0);
+}
+function recentLogs(logs, n) { return safeLogs(logs).slice(0, n); }
+function avgQty(logs, n) {
+  const sl = recentLogs(logs, n);
+  if (!sl.length) return 0;
+  return sl.reduce((a,l) => a + (l.Quantity||0), 0) / sl.length;
+}
+
+// ── FLIP model: окно 3 дня, volatility × liquidity × entry quality ──
+// Штраф за тонкий рынок: <100 сделок/день → линейный понижающий фактор
+function calcFlipScore(logs, curEx) {
+  const sl = recentLogs(logs, 3);
+  if (sl.length < 2 || !curEx) return 0;
+  const prices = sl.map(l => l.Price);
+  const lo = Math.min(...prices), hi = Math.max(...prices);
+  if (lo <= 0) return 0;
+  const volatility = (hi - lo) / lo;
+  const aq = avgQty(logs, 3);
+  if (aq < 20) return 0; // неликвид — не флипуется
+  const liquidity = Math.log10(aq + 1);
+  const liqFactor = Math.min(1, aq / 100);
+  const range = hi - lo;
+  const entryQuality = range > 0 ? Math.max(0, Math.min(1, (hi - curEx) / range)) : 0.5;
+  return volatility * liquidity * liqFactor * (0.5 + entryQuality * 0.5) * 100;
+}
+
+// ── INVEST model: окно 7 дней, тренд × консистентность × ликвидность ──
+function calcInvestScore(logs) {
+  const sl = recentLogs(logs, 7);
+  if (sl.length < 3) return 0;
+  const prices = sl.map(l => l.Price);
+  const newest = prices[0], oldest = prices[prices.length-1];
+  if (oldest <= 0) return 0;
+  const trend = (newest - oldest) / oldest;
+  if (trend <= 0) return 0;
+  const aq = avgQty(logs, 7);
+  if (aq < 20) return 0;
+  const liqFactor = Math.min(1, aq / 50);
+  let upSteps = 0;
+  for (let i = 0; i < prices.length - 1; i++) {
+    if (prices[i] > prices[i+1]) upSteps++; // новее > старее = рост
+  }
+  const consistency = upSteps / (prices.length - 1);
+  const recentP = prices[0], mid = prices[Math.floor(prices.length/2)], oldP = prices[prices.length-1];
+  const momentumBonus = (oldP > 0 && mid > 0)
+    ? (((recentP - mid) / mid > (mid - oldP) / oldP) ? 1.3 : 1.0)
+    : 1.0;
+  return trend * 100 * (0.3 + consistency * 0.7) * momentumBonus * liqFactor;
+}
+
+// возвращает ЧИСЛО (не строку) или null
+function trendPct(logs, days) {
+  const sl = recentLogs(logs, days);
+  if (sl.length < 2) return null;
+  const newest = sl[0].Price, oldest = sl[sl.length-1].Price;
+  if (oldest <= 0) return null;
+  return (newest - oldest) / oldest * 100;
+}
+
+function trendEl(pct) {
+  if (pct === null) return '<span class="trend-flat">—</span>';
+  const p = pct.toFixed(0);
+  if (pct > 5)  return `<span class="trend-up">▲ ${p}%</span>`;
+  if (pct < -5) return `<span class="trend-down">▼ ${Math.abs(p)}%</span>`;
+  return `<span class="trend-flat">~ ${p}%</span>`;
+}
+
+// ── Bids ──
+// Flip: buy = current −2%; sell = min(3д max, cur×1.10)×1.01, floor cur×1.03
+function getFlipBids(logs, curEx) {
+  const sl = recentLogs(logs, 3);
+  if (!sl.length || !curEx) return null;
+  const prices = sl.map(l => l.Price);
+  const hi3 = Math.max(...prices);
+  const buyEx  = curEx * 0.98;
+  const sellEx = Math.max(curEx * 1.03, Math.min(hi3, curEx * 1.10) * 1.01);
+  const margin = buyEx > 0 ? (sellEx - buyEx) / buyEx * 100 : 0;
+  const lo3 = Math.min(...prices);
+  const range = hi3 - lo3;
+  const eq = range > 0 ? Math.max(0, Math.min(1, (hi3 - curEx) / range)) : 0.5;
+  const eqLabel = eq >= 0.6 ? `<span class="entry-good">⬇ хорошо</span>`
+                : eq >= 0.3 ? `<span class="entry-ok">→ средне</span>`
+                :             `<span class="entry-bad">⬆ высоко</span>`;
+  return { buyEx, sellEx, margin, eqLabel };
+}
+
+// Invest: target = cur + дневной прирост ×3, cap +50% (линейная экстраполяция врёт на параболах)
+function getInvestBids(logs, curEx) {
+  const sl = recentLogs(logs, 7);
+  if (sl.length < 2 || !curEx) return null;
+  const prices = sl.map(l => l.Price);
+  const dailyGain = (prices[0] - prices[prices.length-1]) / (prices.length - 1);
+  const buyEx  = curEx * 0.98;
+  let targetEx = curEx + dailyGain * 3;
+  targetEx = Math.min(curEx * 1.5, Math.max(targetEx, curEx * 1.01));
+  const gain = buyEx > 0 ? (targetEx - buyEx) / buyEx * 100 : 0;
+  return { buyEx, targetEx, gain };
+}
+
+function unitsCanBuy(buyEx) {
+  const bEx = getBudgetEx();
+  if (!bEx || !buyEx) return null;
+  return Math.floor(bEx / buyEx);
+}
+function marginCls(m) {
+  return m >= 15 ? 'margin-good' : m >= 7 ? 'margin-ok' : 'margin-low';
+}
+const MIN_FLIP_MARGIN = 10; // %
+function passesFlipMargin(it) {
+  const b = getFlipBids(it.PriceLogs, it.CurrentPrice);
+  return b && b.margin >= MIN_FLIP_MARGIN;
+}
+
+/* ── Category tabs ── */
+function catTabsHtml(mode, activeCat) {
+  const cats = Object.keys(CAT_LABELS);
+  return cats.map(c => {
+    const active = c === activeCat ? `active-${mode}` : '';
+    return `<button class="cat-tab ${active}" onclick="setCat('${mode}','${c}')">${CAT_LABELS[c]}</button>`;
+  }).join('');
+}
+
+function setCat(mode, cat) {
+  if (mode === 'flip') flipCat = cat;
+  else investCat = cat;
+  renderTables();
+}
+
+/* ── Tables ── */
+function filterByCat(items, cat) {
+  if (cat === 'all') return items;
+  return items.filter(it => it.CategoryApiId === cat);
+}
+
+function renderFlipTable(items) {
+  const bEx = getBudgetEx();
+  const capEx = bEx > 0 ? bEx : Infinity;
+  const filtered = filterByCat(items, flipCat)
+    .filter(it => it._flip > 0 && it.CurrentPrice <= capEx && passesFlipMargin(it))
+    .sort((a,b) => b._flip - a._flip)
+    .slice(0, 10);
+
+  if (!filtered.length) return '<div class="no-data">Нет предметов в этой категории</div>';
+  const showUnits = bEx > 0;
+  const hdr = `<tr><th>#</th><th>Предмет</th><th>Цена</th><th>Купить по</th><th>Продать по</th><th>Маржа</th><th>Точка входа</th><th>3д тренд</th>${showUnits?'<th>Кол-во</th>':''}</tr>`;
+  const rows = filtered.map((it,i) => {
+    const bids  = getFlipBids(it.PriceLogs, it.CurrentPrice);
+    const t     = trendPct(it.PriceLogs, 3);
+    const units = bids && showUnits ? unitsCanBuy(bids.buyEx) : null;
+    const buyTxt  = bids ? fmtD(bids.buyEx)  : '—';
+    const sellTxt = bids ? fmtD(bids.sellEx) : '—';
+    const margTxt = bids ? `<span class="${marginCls(bids.margin)}">${bids.margin.toFixed(0)}%</span>` : '—';
+    const eqTxt   = bids ? bids.eqLabel : '—';
+    const unitsTd = showUnits ? `<td>${units!==null?`<span class="units-badge">× ${units}</span>`:''}</td>` : '';
+    return `<tr>
+      <td><span class="rank ${i<3?'top3':''}">${i+1}</span></td>
+      <td><div class="item-name">${it.Text}</div><div class="item-cat">${CAT_LABELS[it.CategoryApiId]||it.CategoryApiId}</div></td>
+      <td><div class="price-now">${fmtD(it.CurrentPrice)}</div></td>
+      <td><div class="bid-buy">${buyTxt}</div><div class="bid-sub">−2% от рынка</div></td>
+      <td><div class="bid-sell">${sellTxt}</div><div class="bid-sub">3д max, cap +10%</div></td>
+      <td>${margTxt}</td>
+      <td>${eqTxt}</td>
+      <td>${trendEl(t)}</td>
+      ${unitsTd}
+    </tr>`;
+  }).join('');
+  return `<div style="overflow-x:auto"><table><thead>${hdr}</thead><tbody>${rows}</tbody></table></div>`;
+}
+
+function renderInvestTable(items) {
+  const bEx = getBudgetEx();
+  const capEx = bEx > 0 ? bEx : Infinity;
+  const filtered = filterByCat(items, investCat)
+    .filter(it => it._inv > 0 && it.CurrentPrice <= capEx)
+    .sort((a,b) => b._inv - a._inv)
+    .slice(0, 10);
+
+  if (!filtered.length) return '<div class="no-data">Нет растущих предметов в этой категории</div>';
+  const showUnits = bEx > 0;
+  const hdr = `<tr><th>#</th><th>Предмет</th><th>Цена</th><th>Купить по</th><th>Цель +3д</th><th>Потенц.</th><th>7д тренд</th>${showUnits?'<th>Кол-во</th>':''}</tr>`;
+  const rows = filtered.map((it,i) => {
+    const bids  = getInvestBids(it.PriceLogs, it.CurrentPrice);
+    const t7    = trendPct(it.PriceLogs, 7);
+    const units = bids && showUnits ? unitsCanBuy(bids.buyEx) : null;
+    const buyTxt  = bids ? fmtD(bids.buyEx)    : '—';
+    const targTxt = bids ? fmtD(bids.targetEx) : '—';
+    const gainTxt = bids ? `<span class="${bids.gain>15?'margin-good':bids.gain>5?'margin-ok':'margin-low'}">${bids.gain.toFixed(0)}%</span>` : '—';
+    const unitsTd = showUnits ? `<td>${units!==null?`<span class="units-badge">× ${units}</span>`:''}</td>` : '';
+    return `<tr>
+      <td><span class="rank ${i<3?'top3':''}">${i+1}</span></td>
+      <td><div class="item-name">${it.Text}</div><div class="item-cat">${CAT_LABELS[it.CategoryApiId]||it.CategoryApiId}</div></td>
+      <td><div class="price-now">${fmtD(it.CurrentPrice)}</div></td>
+      <td><div class="bid-buy">${buyTxt}</div><div class="bid-sub">−2% от рынка</div></td>
+      <td><div class="bid-sell">${targTxt}</div><div class="bid-sub">экстрапол., cap +50%</div></td>
+      <td>${gainTxt}</td>
+      <td>${trendEl(t7)}</td>
+      ${unitsTd}
+    </tr>`;
+  }).join('');
+  return `<div style="overflow-x:auto"><table><thead>${hdr}</thead><tbody>${rows}</tbody></table></div>`;
+}
+
+function renderTables() {
+  const fc = document.getElementById('flip-content');
+  const ic = document.getElementById('invest-content');
+  const ft = document.getElementById('flip-tabs');
+  const it = document.getElementById('invest-tabs');
+  if (fc) fc.innerHTML = renderFlipTable(allValidItems);
+  if (ic) ic.innerHTML = renderInvestTable(allValidItems);
+  if (ft) ft.innerHTML = catTabsHtml('flip', flipCat);
+  if (it) it.innerHTML = catTabsHtml('invest', investCat);
+}
+
+function renderRates(items) {
+  return [...items]
+    .filter(it => it.CurrentPrice > 0 && safeLogs(it.PriceLogs).length > 1)
+    .sort((a,b) => b.CurrentPrice - a.CurrentPrice)
+    .slice(0, 20)
+    .map(it => {
+      const t = trendPct(it.PriceLogs, 3);
+      const flat = t === null || Math.abs(t) < 0.5;
+      const cls = flat ? 'trend-flat' : t > 0 ? 'trend-up' : 'trend-down';
+      const arr = flat ? '~' : t > 0 ? '▲' : '▼';
+      return `<div class="rate-item">
+        <div class="r-name" title="${it.Text}">${it.Text}</div>
+        <div class="r-val">${toDiv(it.CurrentPrice).toFixed(2)}<span style="font-size:10px;color:#aaa"> div</span></div>
+        <div class="r-change"><span class="${cls}">${t!==null?arr+' '+Math.abs(t).toFixed(0)+'%':''}</span></div>
+      </div>`;
+    }).join('');
+}
+
+/* ── Craft arbitrage block ── */
+function profitCls(profitEx) {
+  const d = profitEx / divinePrice;
+  return d >= 0.5 ? 'headroom-good' : d >= 0.2 ? 'headroom-ok' : 'headroom-low';
+}
+
+function renderCraftBlock(runesItems, fragmentsItems, incursionItems) {
+  const sections = [];
+
+  // ── SECTION 1: Рецепты объединения (лига Runes of Aldur) ──
+  // Origin Core: combine в Tower of Origins.
+  // Simulacrum / Breachstone: объединяются из 300 сплинтеров (подтверждено игроком в этой лиге).
+  const fragById = {};
+  (fragmentsItems || []).forEach(it => { fragById[it.ApiId] = it; });
+
+  const fragRecipes = [];
+  const oCradle = fragById['origin-cradle'];
+  const oSpark  = fragById['origin-spark'];
+  const oCore   = fragById['origin-core'];
+  if (oCradle && oSpark && oCore && oCore.CurrentPrice > 0) {
+    const costEx   = oCradle.CurrentPrice + oSpark.CurrentPrice;
+    const profitEx = oCore.CurrentPrice - costEx;
+    fragRecipes.push({
+      name: 'Origin Core',
+      icon: oCore.IconUrl,
+      result: oCore,
+      recipe: `Origin Cradle (${fmtD(oCradle.CurrentPrice)}) + Origin Spark (${fmtD(oSpark.CurrentPrice)})`,
+      costEx, profitEx,
+      note: 'Combine в Tower of Origins'
+    });
+  }
+
+  // 300 × Simulacrum Splinter → Simulacrum
+  const simSplinter = fragById['simulacrum-splinter'];
+  const simFull     = fragById['simulacrum'];
+  if (simSplinter && simFull && simFull.CurrentPrice > 0 && simSplinter.CurrentPrice > 0) {
+    const costEx   = simSplinter.CurrentPrice * 300;
+    const profitEx = simFull.CurrentPrice - costEx;
+    fragRecipes.push({
+      name: 'Simulacrum',
+      icon: simFull.IconUrl,
+      result: simFull,
+      recipe: `300 × Simulacrum Splinter (${simSplinter.CurrentPrice.toFixed(2)} ex × 300 = ${fmtD(costEx)})`,
+      costEx, profitEx,
+      note: '300 сплинтеров объединяются в Simulacrum'
+    });
+  }
+
+  // 300 × Breach Splinter → Breachstone
+  const bSplinter = fragById['breach-splinter'];
+  const bStone    = fragById['breachstone'];
+  if (bSplinter && bStone && bStone.CurrentPrice > 0 && bSplinter.CurrentPrice > 0) {
+    const costEx   = bSplinter.CurrentPrice * 300;
+    const profitEx = bStone.CurrentPrice - costEx;
+    fragRecipes.push({
+      name: 'Breachstone',
+      icon: bStone.IconUrl,
+      result: bStone,
+      recipe: `300 × Breach Splinter (${bSplinter.CurrentPrice.toFixed(2)} ex × 300 = ${fmtD(costEx)})`,
+      costEx, profitEx,
+      note: '300 сплинтеров объединяются в Breachstone'
+    });
+  }
+
+  const profitableFragRecipes = fragRecipes.filter(r => r.profitEx > 0);
+  if (profitableFragRecipes.length) {
+    const hdr = `<tr><th>#</th><th>Предмет</th><th>Рыночная цена</th><th>Состав (стоимость)</th><th>Прибыль</th><th>Маржа %</th><th>Примечание</th></tr>`;
+    const rows = profitableFragRecipes
+      .sort((a,b) => b.profitEx - a.profitEx)
+      .map((r, i) => {
+        const pDiv = fmtD(r.result.CurrentPrice);
+        const profDiv = fmtD(r.profitEx);
+        const pct = r.costEx > 0 ? (r.profitEx / r.costEx * 100).toFixed(0) : 0;
+        const cls = profitCls(r.profitEx);
+        return `<tr>
+          <td><span class="rank ${i<3?'top3':''}">${i+1}</span></td>
+          <td>
+            <div style="display:flex;align-items:center;gap:5px">
+              <img src="${r.icon}" width="18" height="18" style="image-rendering:pixelated" onerror="this.style.display='none'">
+              <div class="item-name">${r.name}</div>
+            </div>
+          </td>
+          <td><div class="price-now">${pDiv}</div></td>
+          <td><div style="font-size:11px;color:#555;max-width:220px">${r.recipe}</div></td>
+          <td><div class="${cls}">${profDiv}</div></td>
+          <td><span class="${cls}">${pct}%</span></td>
+          <td><div class="item-cat">${r.note}</div></td>
+        </tr>`;
+      }).join('');
+    sections.push(`
+      <div style="padding:6px 13px 4px;font-size:11px;font-weight:700;color:#4a148c;border-bottom:1px solid #f0f0f0;background:#faf8ff">
+        🧩 Фрагменты — собираем из частей
+      </div>
+      <div style="overflow-x:auto"><table><thead>${hdr}</thead><tbody>${rows}</tbody></table></div>`);
+  }
+
+  // ── SECTION 2: Perfect Runes ──
+  const masterwork = runesItems.find(it => it.ApiId === 'masterwork-rune');
+  const mwEx = masterwork?.CurrentPrice || 0;
+  const orbExtraction = (incursionItems || []).find(it => it.ApiId === 'orb-of-extraction');
+  const orbEx = orbExtraction?.CurrentPrice || 0;
+  const knownCostEx = mwEx + orbEx;
+
+  const perfectRunes = runesItems
+    .filter(it => it.ApiId.startsWith('perfect-') && it.ApiId.endsWith('-rune') && it.CurrentPrice > knownCostEx)
+    .map(it => ({ ...it, headroom: it.CurrentPrice - knownCostEx }))
+    .sort((a, b) => b.headroom - a.headroom);
+
+  if (perfectRunes.length && knownCostEx > 0) {
+    const mwDiv  = fmtD(mwEx);
+    const orbDiv = orbEx > 0 ? fmtD(orbEx) : '?';
+    const knownDiv = fmtD(knownCostEx);
+    const hdr2 = `<tr><th>#</th><th>Perfect Rune</th><th>Цена продажи</th><th>Masterwork</th><th>Orb of Extraction</th><th>Макс. цена Greater</th><th>Прибыль если Greater=0</th></tr>`;
+    const rows2 = perfectRunes.map((it, i) => {
+      const profitIfFree = it.CurrentPrice - knownCostEx;
+      const hCls = profitCls(profitIfFree);
+      const baseName = it.ApiId.replace('perfect-','').replace('-rune','')
+        .split('-').map(w=>w[0].toUpperCase()+w.slice(1)).join(' ');
+      const headroomStr = it.headroom > 0
+        ? `<div class="${hCls}">${fmtD(it.headroom)}</div><div class="bid-sub">breakeven для Greater</div>`
+        : `<div style="color:#f44336;font-weight:700;font-size:12px">убыток без Greater</div>`;
+      return `<tr>
+        <td><span class="rank ${i<3?'top3':''}">${i+1}</span></td>
+        <td><div class="item-name">${it.Text}</div><div class="item-cat">Greater ${baseName} Rune (в предмет) → Masterwork → Orb</div></td>
+        <td><div class="price-now">${fmtD(it.CurrentPrice)}</div></td>
+        <td><div style="color:#7b1fa2;font-weight:700;font-size:12px">${mwDiv}</div></td>
+        <td><div style="color:#5c1a9e;font-weight:700;font-size:12px">${orbDiv}</div></td>
+        <td>${headroomStr}</td>
+        <td><span class="${hCls}">${profitIfFree > 0 ? fmtD(profitIfFree) : '—'}</span></td>
+      </tr>`;
+    }).join('');
+    sections.push(`
+      <div style="padding:6px 13px 4px;font-size:11px;font-weight:700;color:#4a148c;border-bottom:1px solid #f0f0f0;background:#faf8ff;${fragRecipes.length?'border-top:1px solid #e0d5ff':''}">
+        💎 Perfect Runes — Greater Rune (в предмет) + Masterwork Rune + Orb of Extraction
+        <span style="font-weight:400;color:#888"> · MW: ${mwDiv} · Orb: ${orbDiv} · Итого без Greater: ${knownDiv} · цена Greater — <a href="https://www.pathofexile.com/trade2" target="_blank" style="color:#7b1fa2">trade</a></span>
+      </div>
+      <div style="overflow-x:auto"><table><thead>${hdr2}</thead><tbody>${rows2}</tbody></table></div>`);
+  }
+
+  if (!sections.length) return '';
+
+  const total = profitableFragRecipes.length + perfectRunes.length;
+  return `<div class="craft-block">
+    <div class="card-header">⚗️ Крафт арбитраж <span class="badge badge-craft" style="margin-left:auto">${total} рецептов</span></div>
+    <div class="craft-note">Только проверенные рецепты. Учитывай комиссию биржи в голде и риск изменения цены за время сборки.</div>
+    ${sections.join('')}
+  </div>`;
+}
+
+/* ── Portfolio ── */
+let pfSplit = parseInt(localStorage.getItem('poe2_pf_split') || '50');
+let pfCur   = localStorage.getItem('poe2_pf_cur') || 'ex'; // валюта ордеров: ex | div | c
+
+function setPfSplit(v) {
+  pfSplit = parseInt(v);
+  localStorage.setItem('poe2_pf_split', pfSplit);
+  renderPortfolio();
+}
+
+function setPfCur(c) {
+  pfCur = c;
+  localStorage.setItem('poe2_pf_cur', c);
+  renderPortfolio();
+}
+
+/* Ордеры котируем в EXALTED (целые числа — биржа принимает всегда).
+   Все предметы в выборке стоят ≥1 div ≈ 132 ex, так что округление до целого ex теряет <0.5%. */
+function renderPortfolio() {
+  const el = document.getElementById('portfolio-content');
+  if (!el) return;
+  const budgetEx = getBudgetEx();
+  if (!budgetEx || budgetEx <= 0) {
+    el.innerHTML = '<div class="pf-no-budget">Укажи свободные div / ex / chaos в шапке чтобы увидеть рекомендованный портфель</div>';
+    return;
+  }
+
+  const flipBudEx   = budgetEx * (pfSplit / 100);
+  const investBudEx = budgetEx * ((100 - pfSplit) / 100);
+
+  const flipItems   = [...allValidItems]
+    .filter(it => it._flip > 0 && it.CurrentPrice <= flipBudEx && passesFlipMargin(it))
+    .sort((a,b) => b._flip - a._flip)
+    .slice(0, 5);
+  const investItems = [...allValidItems]
+    .filter(it => it._inv > 0 && it.CurrentPrice <= investBudEx)
+    .sort((a,b) => b._inv - a._inv)
+    .slice(0, 5);
+
+  // Распределение по score; qty = floor(доля/цена), затем жадная докупка остатка
+  // в порядке score, чтобы не оставлять свободные div без работы
+  function allocate(items, totalEx, scoreKey, getSell) {
+    if (!items.length) return { rows: [], leftover: totalEx };
+    const totalScore = items.reduce((s,it) => s + (it[scoreKey] || 1), 0);
+    const rows = [];
+    for (const it of items) {
+      const buyExI  = Math.max(1, Math.round(it.CurrentPrice * 0.98));
+      const sellRaw = getSell(it);
+      if (!sellRaw) continue;
+      const sellExI = Math.max(buyExI + 1, Math.round(sellRaw));
+      const share = totalEx * ((it[scoreKey] || 1) / totalScore);
+      rows.push({ it, qty: Math.floor(share / buyExI), buyExI, sellExI });
+    }
+    let leftover = totalEx - rows.reduce((s,r) => s + r.qty * r.buyExI, 0);
+    // докупаем по кругу (rows уже отсортированы по score), пока хоть что-то влезает
+    let progress = true;
+    while (progress) {
+      progress = false;
+      for (const r of rows) {
+        if (r.buyExI <= leftover) { r.qty++; leftover -= r.buyExI; progress = true; }
+      }
+    }
+    return {
+      rows: rows.filter(r => r.qty > 0).map(r => ({ ...r,
+        costEx: r.qty * r.buyExI,
+        profitEx: r.qty * (r.sellExI - r.buyExI) })),
+      leftover
+    };
+  }
+
+  const flipRes = allocate(flipItems, flipBudEx, '_flip', it => {
+    const b = getFlipBids(it.PriceLogs, it.CurrentPrice);
+    return b ? b.sellEx : null;
+  });
+  const investRes = allocate(investItems, investBudEx, '_inv', it => {
+    const b = getInvestBids(it.PriceLogs, it.CurrentPrice);
+    return b ? b.targetEx : null;
+  });
+  const leftoverEx = flipRes.leftover + investRes.leftover;
+
+  // Котирование ордеров в выбранной валюте: оба тотала — целые числа (требование биржи).
+  // В div/c шаг сетки крупнее — если округлённая продажа ≤ закупки, поднимаем на 1 шаг и помечаем ⚠.
+  const CUR = { ex: {label:'ex', rate:1}, div: {label:'div', rate:divinePrice}, c: {label:'c', rate:chaosPrice} };
+  const cur = CUR[pfCur] || CUR.ex;
+  function quote(r) {
+    const buyTot  = Math.max(1, Math.round(r.qty * r.buyExI / cur.rate));
+    const sellRaw = Math.round(r.qty * r.sellExI / cur.rate);
+    const gridWarn = sellRaw <= buyTot;
+    const sellTot = Math.max(buyTot + 1, sellRaw);
+    return { ...r, buyTot, sellTot, gridWarn,
+      costEx: buyTot * cur.rate,
+      profitEx: (sellTot - buyTot) * cur.rate };
+  }
+  const flipAlloc   = flipRes.rows.map(quote);
+  const investAlloc = investRes.rows.map(quote);
+
+  const flipSpent    = flipAlloc.reduce((s,r) => s + r.costEx, 0);
+  const investSpent  = investAlloc.reduce((s,r) => s + r.costEx, 0);
+  const flipProfit   = flipAlloc.reduce((s,r) => s + r.profitEx, 0);
+  const investProfit = investAlloc.reduce((s,r) => s + r.profitEx, 0);
+
+  function pfRows(alloc, mode) {
+    if (!alloc.length) return '<div class="pf-row" style="color:#aaa;font-size:11px;padding:12px 13px">Нет подходящих позиций в рамках бюджета</div>';
+    const modeLabel = mode === 'flip' ? 'продажа' : 'цель +3д';
+    return alloc.map((r,i) => {
+      const profEx = r.profitEx; // qty уже учтён — НЕ умножать ещё раз
+      const profCls = toDiv(profEx) >= 0.5 ? 'pf-profit-good' : 'pf-profit-ok';
+      const unitBuyEx  = r.buyTot  * cur.rate / r.qty;
+      const unitSellEx = r.sellTot * cur.rate / r.qty;
+      return `<div class="pf-row">
+        <div class="pf-num">${i+1}</div>
+        <div class="pf-info">
+          <div class="pf-name" title="${r.it.Text}">${r.it.Text}</div>
+          <div class="pf-detail" style="color:#1565c0;font-weight:600">закупка: ${r.qty} шт за ${r.buyTot} ${cur.label} (≈${unitBuyEx.toFixed(0)} ex/шт)</div>
+          <div class="pf-detail" style="color:#2e7d32">${modeLabel}: ${r.qty} шт за ${r.sellTot} ${cur.label} (≈${unitSellEx.toFixed(0)} ex/шт)</div>
+          <div class="pf-detail">итого закупка: ${fmtD(r.costEx, 1)} ≈ ${fmtC(r.costEx, 0)}${r.gridWarn ? ' <span class="grid-warn">⚠ шаг цены в ' + cur.label + ' крупнее маржи — продажа округлена вверх</span>' : ''}</div>
+        </div>
+        <div class="pf-alloc">
+          <div class="qty">× ${r.qty}</div>
+          <div class="cost">${fmtD(r.costEx, 1)}</div>
+          ${profEx > 0 ? `<div class="profit ${profCls}">+${toDiv(profEx).toFixed(2)} div</div>` : ''}
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  const sliderHtml = `
+    <div class="pf-split">
+      <label>Распределение:</label>
+      <span class="pf-flip-lbl">Флип ${pfSplit}%</span>
+      <input class="pf-slider" type="range" min="0" max="100" step="10" value="${pfSplit}"
+        oninput="setPfSplit(this.value)">
+      <span class="pf-invest-lbl">${100-pfSplit}% Инвест</span>
+      <span style="font-size:10px;color:#bbb;margin-left:4px">
+        (${toDiv(flipBudEx).toFixed(1)} div / ${toDiv(investBudEx).toFixed(1)} div)
+      </span>
+      <span style="margin-left:auto;display:flex;align-items:center;gap:4px">
+        <label>Ордеры в:</label>
+        <button class="cur-btn ${pfCur==='ex'?'active':''}"  onclick="setPfCur('ex')">ex</button>
+        <button class="cur-btn ${pfCur==='div'?'active':''}" onclick="setPfCur('div')">div</button>
+        <button class="cur-btn ${pfCur==='c'?'active':''}"   onclick="setPfCur('c')">chaos</button>
+      </span>
+    </div>`;
+
+  const summaryHtml = `
+    <div class="pf-summary">
+      <div class="pf-summary-item">💸 Флип потратить: <span>${toDiv(flipSpent).toFixed(2)} div · ${fmtC(flipSpent, 0)}</span></div>
+      <div class="pf-summary-item">📦 Инвест потратить: <span>${toDiv(investSpent).toFixed(2)} div · ${fmtC(investSpent, 0)}</span></div>
+      <div class="pf-summary-item">🔄 Ожид. прибыль флип: <span style="color:#e65100">+${toDiv(flipProfit).toFixed(2)} div (${fmtC(flipProfit, 0)})</span></div>
+      <div class="pf-summary-item">📈 Ожид. прибыль инвест: <span style="color:#2e7d32">+${toDiv(investProfit).toFixed(2)} div (${fmtC(investProfit, 0)})</span></div>
+      <div class="pf-summary-item">✨ Итого ожид.: <span style="color:#c9a84c">+${toDiv(flipProfit+investProfit).toFixed(2)} div (${fmtC(flipProfit+investProfit, 0)})</span></div>
+      <div class="pf-summary-item">💤 Остаток: <span>${toDiv(leftoverEx).toFixed(2)} div · ${fmtC(leftoverEx, 0)}</span></div>
+    </div>`;
+
+  el.innerHTML = `${sliderHtml}
+    <div class="pf-cols">
+      <div class="pf-col">
+        <div class="pf-col-hdr flip-hdr">
+          🔄 Флип портфель
+          <span class="pf-total">бюджет <span>${toDiv(flipBudEx).toFixed(1)} div</span></span>
+        </div>
+        ${pfRows(flipAlloc, 'flip')}
+      </div>
+      <div class="pf-col">
+        <div class="pf-col-hdr invest-hdr">
+          📦 Инвест портфель
+          <span class="pf-total">бюджет <span>${toDiv(investBudEx).toFixed(1)} div</span></span>
+        </div>
+        ${pfRows(investAlloc, 'invest')}
+      </div>
+    </div>
+    ${summaryHtml}`;
+}
+
+/* ── Trade tracker ──
+   Журнал сделок в localStorage. Цена за штуку в выбранной валюте;
+   в момент записи фиксируется курс (priceEx) — прошлые сделки не «переоцениваются».
+   P&L: средняя цена закупки по предмету; реализованная = выручка − ср.закупка × мин(продано, куплено);
+   нереализованная = (рыночная − ср.закупка) × остаток по живой цене poe2scout. */
+function getTrades() {
+  try { const t = JSON.parse(localStorage.getItem(tradesKey()) || '[]'); return Array.isArray(t) ? t : []; }
+  catch { return []; }
+}
+function saveTrades(t) { localStorage.setItem(tradesKey(), JSON.stringify(t)); }
+
+function curRate(cur) { return cur === 'div' ? divinePrice : cur === 'c' ? chaosPrice : 1; }
+
+function addTrade() {
+  const errEl = document.getElementById('tr-err');
+  errEl.textContent = '';
+  const side  = document.getElementById('tr-side').value;
+  const item  = document.getElementById('tr-item').value.trim();
+  const qty   = parseInt(document.getElementById('tr-qty').value);
+  const price = parseFloat(document.getElementById('tr-price').value);
+  const cur   = document.getElementById('tr-cur').value;
+  if (!item) { errEl.textContent = 'укажи предмет'; return; }
+  if (!qty || qty < 1) { errEl.textContent = 'кол-во ≥ 1'; return; }
+  if (!price || price <= 0) { errEl.textContent = 'цена > 0'; return; }
+  const trades = getTrades();
+  trades.push({
+    id: Date.now(),
+    ts: new Date().toLocaleString('ru', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }),
+    item, side, qty, price, cur,
+    priceEx: price * curRate(cur)
+  });
+  saveTrades(trades);
+  renderTracker(true);
+}
+
+function delTrade(id) {
+  saveTrades(getTrades().filter(t => t.id !== id));
+  renderTracker(true);
+}
+
+function renderTracker(keepItem) {
+  const el = document.getElementById('tracker-content');
+  if (!el) return;
+  const prevItem = keepItem ? '' : (document.getElementById('tr-item')?.value || '');
+  const trades = getTrades();
+
+  // ── сводка по предметам ──
+  const byItem = {};
+  for (const t of trades) {
+    const o = byItem[t.item] ?? (byItem[t.item] = { buyQ:0, buyEx:0, sellQ:0, sellEx:0 });
+    if (t.side === 'buy') { o.buyQ += t.qty; o.buyEx += t.qty * t.priceEx; }
+    else                  { o.sellQ += t.qty; o.sellEx += t.qty * t.priceEx; }
+  }
+  let totalRealized = 0, totalUnreal = 0, hasUnreal = false;
+  const sumRows = Object.entries(byItem).map(([name, o]) => {
+    const avgBuy  = o.buyQ  ? o.buyEx  / o.buyQ  : 0;
+    const matched = Math.min(o.sellQ, o.buyQ);
+    const noBasis = o.sellQ > o.buyQ;
+    const realized = o.sellEx - avgBuy * matched; // непокрытые продажи идут с базой 0 (помечаем)
+    totalRealized += realized;
+    const open = o.buyQ - matched;
+    const mkt = marketByText[name];
+    let unrealStr = '<span class="pnl-na">—</span>';
+    if (open > 0 && mkt && mkt.CurrentPrice > 0) {
+      const unreal = (mkt.CurrentPrice - avgBuy) * open;
+      totalUnreal += unreal; hasUnreal = true;
+      unrealStr = `<span class="${unreal>=0?'pnl-pos':'pnl-neg'}">${unreal>=0?'+':''}${toDiv(unreal).toFixed(2)} div</span>`;
+    } else if (open > 0) {
+      unrealStr = '<span class="pnl-na">нет рын. цены</span>';
+    }
+    const realStr = (o.sellQ > 0)
+      ? `<span class="${realized>=0?'pnl-pos':'pnl-neg'}">${realized>=0?'+':''}${toDiv(realized).toFixed(2)} div</span>${noBasis?' <span class="pnl-na" title="продано больше чем куплено — часть без базы">⚠</span>':''}`
+      : '<span class="pnl-na">—</span>';
+    return `<tr>
+      <td><div class="item-name">${name}</div></td>
+      <td>${o.buyQ ? `${o.buyQ} шт · ср. ${fmtD(avgBuy)}` : '—'}</td>
+      <td>${o.sellQ ? `${o.sellQ} шт · ср. ${fmtD(o.sellQ ? o.sellEx/o.sellQ : 0)}` : '—'}</td>
+      <td>${open > 0 ? `<span class="units-badge">× ${open}</span>` : '—'}</td>
+      <td>${realStr}</td>
+      <td>${unrealStr}</td>
+    </tr>`;
+  }).join('');
+
+  // ── журнал ──
+  const logRows = [...trades].reverse().map(t => `<tr>
+    <td style="white-space:nowrap;color:#aaa;font-size:11px">${t.ts}</td>
+    <td><span class="${t.side==='buy'?'tr-side-buy':'tr-side-sell'}">${t.side==='buy'?'Покупка':'Продажа'}</span></td>
+    <td><div class="item-name">${t.item}</div></td>
+    <td>${t.qty} шт</td>
+    <td>${t.price} ${t.cur} <span class="bid-sub">(${fmtD(t.priceEx)}/шт)</span></td>
+    <td>${(t.qty*t.price).toFixed(t.cur==='ex'?0:2)} ${t.cur} <span class="bid-sub">≈ ${fmtD(t.qty*t.priceEx,1)}</span></td>
+    <td><button class="tr-del" onclick="delTrade(${t.id})" title="удалить">✕</button></td>
+  </tr>`).join('');
+
+  const total = totalRealized + totalUnreal;
+  const pnlCls = v => v >= 0 ? 'pnl-pos' : 'pnl-neg';
+  const summaryBar = trades.length ? `
+    <div class="pf-summary">
+      <div class="pf-summary-item">✅ Реализовано: <span class="${pnlCls(totalRealized)}">${totalRealized>=0?'+':''}${toDiv(totalRealized).toFixed(2)} div · ${fmtC(totalRealized,0)}</span></div>
+      <div class="pf-summary-item">📊 Нереализовано: <span class="${hasUnreal?pnlCls(totalUnreal):'pnl-na'}">${hasUnreal?(totalUnreal>=0?'+':'')+toDiv(totalUnreal).toFixed(2)+' div · '+fmtC(totalUnreal,0):'—'}</span></div>
+      <div class="pf-summary-item">💰 Итого: <span class="${pnlCls(total)}">${total>=0?'+':''}${toDiv(total).toFixed(2)} div · ${fmtC(total,0)}</span></div>
+    </div>` : '';
+
+  el.innerHTML = `
+    <div class="tr-form">
+      <select id="tr-side">
+        <option value="buy">Покупка</option>
+        <option value="sell">Продажа</option>
+      </select>
+      <input class="tr-item-inp" id="tr-item" list="items-dl" placeholder="Предмет (автоподстановка)" value="${prevItem.replace(/"/g,'&quot;')}">
+      <input id="tr-qty" type="number" min="1" step="1" placeholder="кол-во" style="width:70px">
+      <input id="tr-price" type="number" min="0" step="any" placeholder="цена/шт" style="width:80px">
+      <select id="tr-cur">
+        <option value="ex">ex</option>
+        <option value="div">div</option>
+        <option value="c">chaos</option>
+      </select>
+      <button class="tr-btn" onclick="addTrade()">+ Записать</button>
+      <span class="tr-err" id="tr-err"></span>
+    </div>
+    ${sumRows ? `<div style="overflow-x:auto"><table><thead><tr><th>Предмет</th><th>Куплено</th><th>Продано</th><th>Остаток</th><th>Реализ. P&L</th><th>Нереализ. P&L</th></tr></thead><tbody>${sumRows}</tbody></table></div>` : ''}
+    ${logRows ? `<div style="overflow-x:auto;border-top:1px solid #f0f0f0"><table><thead><tr><th>Когда</th><th>Тип</th><th>Предмет</th><th>Кол-во</th><th>Цена/шт</th><th>Сумма</th><th></th></tr></thead><tbody>${logRows}</tbody></table></div>`
+                : '<div class="no-data">Сделок пока нет — запиши первую покупку или продажу</div>'}
+    ${summaryBar}`;
+}
+
+/* ── Price Check + Stash ── */
+let mainTab = 'market';
+let pcLast = null;
+
+function switchMainTab(t) {
+  mainTab = t;
+  ['market', 'price', 'help'].forEach(k => {
+    const el = document.getElementById('tab-' + k);
+    if (el) el.style.display = k === t ? '' : 'none';
+    document.getElementById('mt-' + k)?.classList.toggle('active', k === t);
+  });
+  if (t === 'price') renderStash();
+}
+
+// Парсер игрового Ctrl+C: имя = последняя строка первого блока без Item Class/Rarity,
+// количество из "Stack Size: N/M"
+function parseItemText(text) {
+  if (!text || !text.trim()) return null;
+  const norm = text.replace(/\r/g, '');
+  const blocks = norm.split(/\n\s*-{4,}\s*\n/);
+  const first = (blocks[0] || '').split('\n').map(s => s.trim()).filter(Boolean);
+  const nameCands = first.filter(l => !/^(Item Class|Rarity)\s*:/i.test(l));
+  let qty = 1;
+  const m = norm.match(/Stack Size\s*:\s*([\d,]+)\s*\/\s*[\d,]+/i);
+  if (m) qty = parseInt(m[1].replace(/,/g, '')) || 1;
+  return { nameCands, qty };
+}
+
+function findMarketItem(nameCands) {
+  const keys = Object.keys(marketByText);
+  for (let i = nameCands.length - 1; i >= 0; i--) {
+    const c = nameCands[i].toLowerCase();
+    const k = keys.find(k => k.toLowerCase() === c);
+    if (k) return marketByText[k];
+  }
+  return null;
+}
+
+/* Рекомендация продать/держать. Сигналы и веса:
+   1) 7д тренд: >+50% перегрев (−1), +15..50 рост (+1), <−15% падение (−2: дальше дешевле)
+   2) разворот: 7д рос, а 3д уже минус (−2: рост выдохся); 3д ≥ половины 7д (+1: импульс жив)
+   3) 24ч: просадка >3% после сильного роста (−2: окно фиксации); +3% (+1)
+   4) позиция в 7д диапазоне: у максимума (−1: выгодно продать), у дна без падения (+1: продавать невыгодно)
+   5) предложение: −40% объёма за неделю (+1: дефицит), +60% (−1: давление)
+   6) ликвидность <20/день — предупреждение без очков
+   Σ: ≤−3 продавать сейчас, −1..−2 скорее продавать, 0 нейтрально, 1..2 скорее держать, ≥3 держать */
+function adviseItem(it) {
+  const logs = safeLogs(it.PriceLogs);
+  const cur = it.CurrentPrice;
+  const t3 = trendPct(logs, 3), t7 = trendPct(logs, 7);
+  const yest = logs.length >= 2 ? logs[1].Price : null;
+  const day = yest ? (cur - yest) / yest * 100 : null;
+  const qNew = logs[0]?.Quantity || 0, qOld = logs[logs.length-1]?.Quantity || 0;
+  const supply = qOld > 0 ? (qNew - qOld) / qOld * 100 : null;
+  const aq = avgQty(logs, 3);
+  const prices = logs.map(l => l.Price);
+  const hi7 = Math.max(...prices, cur), lo7 = Math.min(...prices, cur);
+  const pos = hi7 > lo7 ? (cur - lo7) / (hi7 - lo7) : 0.5;
+
+  let score = 0;
+  const reasons = [];
+  if (t7 !== null) {
+    if (t7 > 50)       { score -= 1; reasons.push(`📈 +${t7.toFixed(0)}% за 7д — цена перегрета, растёт риск отката`); }
+    else if (t7 > 15)  { score += 1; reasons.push(`📈 устойчивый рост +${t7.toFixed(0)}% за 7д`); }
+    else if (t7 < -15) { score -= 2; reasons.push(`📉 ${t7.toFixed(0)}% за 7д — нисходящий тренд, дальше скорее дешевле`); }
+    else reasons.push(`↔ 7д тренд слабый (${t7 >= 0 ? '+' : ''}${t7.toFixed(0)}%)`);
+  }
+  if (t7 !== null && t3 !== null && t7 > 15) {
+    if (t3 < 0)           { score -= 2; reasons.push(`🔄 рост выдохся: 3д тренд уже ${t3.toFixed(0)}% — начался откат`); }
+    else if (t3 > t7 / 2) { score += 1; reasons.push(`🔥 импульс сохраняется (3д: +${t3.toFixed(0)}%)`); }
+  }
+  if (day !== null) {
+    if (day < -3 && (t7 ?? 0) > 30) { score -= 2; reasons.push(`⏰ ${day.toFixed(1)}% за 24ч после сильного роста — окно фиксации прибыли`); }
+    else if (day > 3)               { score += 1; reasons.push(`▲ +${day.toFixed(1)}% за 24ч`); }
+  }
+  if (pos > 0.9)                          { score -= 1; reasons.push(`🎯 цена у максимума 7д диапазона — выгодная точка продажи`); }
+  else if (pos < 0.2 && (t3 ?? 0) >= 0)   { score += 1; reasons.push(`🛟 цена у дна диапазона и не падает — продавать сейчас невыгодно`); }
+  if (supply !== null) {
+    if (supply < -40)     { score += 1; reasons.push(`📦 предложение упало на ${Math.abs(supply).toFixed(0)}% за неделю — дефицит поддерживает цену`); }
+    else if (supply > 60) { score -= 1; reasons.push(`📦 предложение выросло на ${supply.toFixed(0)}% — давление на цену`); }
+  }
+  if (aq < 20) reasons.push(`🐌 низкая ликвидность (~${aq.toFixed(0)} сделок/день) — продажа может занять время`);
+
+  let verdict, cls;
+  if (score <= -3)      { verdict = '🔻 ПРОДАВАТЬ СЕЙЧАС'; cls = 'verdict-sell'; }
+  else if (score <= -1) { verdict = '💰 СКОРЕЕ ПРОДАВАТЬ'; cls = 'verdict-sell'; }
+  else if (score >= 3)  { verdict = '🔥 ДЕРЖАТЬ'; cls = 'verdict-hold'; }
+  else if (score >= 1)  { verdict = '✊ СКОРЕЕ ДЕРЖАТЬ'; cls = 'verdict-hold'; }
+  else                  { verdict = '↔ НЕЙТРАЛЬНО'; cls = 'verdict-neutral'; }
+  return { verdict, cls, reasons, score };
+}
+
+// Вставка из буфера: clipboard API может быть заблокирован в песочнице — тогда подсказываем Ctrl+V
+async function pcPaste() {
+  const ta = document.getElementById('pc-input');
+  const res = document.getElementById('pc-result');
+  try {
+    const txt = await navigator.clipboard.readText();
+    if (txt && txt.trim()) {
+      ta.value = txt;
+      pcEvaluate(); // сразу оцениваем
+    } else {
+      res.innerHTML = '<div class="no-data">Буфер обмена пуст — скопируй предмет в игре (Ctrl+C)</div>';
+    }
+  } catch (e) {
+    ta.value = '';
+    ta.focus();
+    res.innerHTML = '<div class="no-data">Песочница не даёт читать буфер напрямую. Поле уже в фокусе — просто нажми <b>Ctrl+V</b>, оценка запустится автоматически.</div>';
+  }
+}
+
+function pcEvaluate() {
+  const res = document.getElementById('pc-result');
+  const txt = document.getElementById('pc-input').value;
+  pcLast = null;
+  const parsed = parseItemText(txt);
+  if (!parsed || !parsed.nameCands.length) {
+    res.innerHTML = '<div class="no-data">Не удалось распознать предмет — вставь текст целиком (Ctrl+C на предмете в игре)</div>';
+    return;
+  }
+  const it = findMarketItem(parsed.nameCands);
+  if (!it) {
+    res.innerHTML = `<div class="no-data">«${parsed.nameCands[parsed.nameCands.length-1]}» не найден в валютных данных poe2scout</div>`;
+    return;
+  }
+  const qty = parsed.qty;
+  pcLast = { it, qty };
+  const a = adviseItem(it);
+  const unit = it.CurrentPrice, stack = unit * qty;
+  res.innerHTML = `<div class="pc-res">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap">
+      <img src="${it.IconUrl}" width="28" height="28" style="image-rendering:pixelated" onerror="this.style.display='none'">
+      <div>
+        <div class="item-name" style="font-size:14px">${it.Text}</div>
+        <div class="item-cat">${CAT_LABELS[it.CategoryApiId]||it.CategoryApiId} · ${qty} шт</div>
+      </div>
+      <div class="verdict-badge ${a.cls}" style="margin-left:auto">${a.verdict}</div>
+    </div>
+    <div class="pc-prices">
+      <div class="pc-price-box"><div class="lbl">за 1 шт</div><div class="val">${unit.toFixed(unit<10?2:1)} ex</div><div class="bid-sub">${toDiv(unit).toFixed(3)} div · ${toC(unit).toFixed(1)} c</div></div>
+      <div class="pc-price-box"><div class="lbl">стак (${qty} шт)</div><div class="val">${stack.toFixed(0)} ex</div><div class="bid-sub">${toDiv(stack).toFixed(2)} div · ${toC(stack).toFixed(0)} c</div></div>
+    </div>
+    ${a.reasons.map(r => `<div class="pc-reason">${r}</div>`).join('')}
+    <div class="pc-reason" style="color:#aaa;margin-top:4px">Оценка по 7-дневной динамике poe2scout; патчи, анонсы и конец лиги не учитываются.</div>
+    <button class="tr-btn" style="margin-top:8px" onclick="stashAdd()">+ В Stash</button>
+  </div>`;
+}
+
+/* Stash */
+function getStash() {
+  try { const s = JSON.parse(localStorage.getItem(stashKey()) || '[]'); return Array.isArray(s) ? s : []; }
+  catch { return []; }
+}
+function saveStash(s) { localStorage.setItem(stashKey(), JSON.stringify(s)); }
+
+function stashAdd() {
+  if (!pcLast) return;
+  const s = getStash();
+  const ts = new Date().toLocaleString('ru', { day:'2-digit', month:'2-digit' });
+  const existing = s.find(x => x.name === pcLast.it.Text);
+  if (existing) {
+    // повторное добавление: обновляем количество (базовая цена и дата добавления сохраняются для Δ)
+    existing.qty = pcLast.qty;
+  } else {
+    s.push({ id: Date.now(), name: pcLast.it.Text, qty: pcLast.qty, addPriceEx: pcLast.it.CurrentPrice, ts });
+  }
+  saveStash(s);
+  renderStash();
+}
+function stashDel(id) { saveStash(getStash().filter(x => x.id !== id)); renderStash(); }
+
+// раскрытие обоснования рекомендации по клику на предмет
+let stashExpanded = new Set();
+function stashToggle(id) {
+  if (stashExpanded.has(id)) stashExpanded.delete(id); else stashExpanded.add(id);
+  renderStash();
+}
+
+/* Сортировка стеша. Дефолтные направления при первом клике:
+   имя — A→Я; кол-во, цена/шт, стак, Δ — по убыванию;
+   рекомендация — по срочности: продавать сейчас > скорее продавать > нейтрально > скорее держать > держать.
+   Повторный клик — реверс. */
+let stashSort = (() => {
+  try { return JSON.parse(localStorage.getItem('poe2_stash_sort') || 'null') || { key: null, dir: 1 }; }
+  catch { return { key: null, dir: 1 }; }
+})();
+
+function setStashSort(key) {
+  if (stashSort.key === key) stashSort.dir *= -1;
+  else stashSort = { key, dir: (key === 'name' || key === 'verdict') ? 1 : -1 };
+  localStorage.setItem('poe2_stash_sort', JSON.stringify(stashSort));
+  renderStash();
+}
+
+function renderStash() {
+  const el = document.getElementById('pc-stash');
+  if (!el) return;
+  const s = getStash();
+  const cnt = document.getElementById('stash-count');
+  if (cnt) cnt.textContent = s.length;
+  if (!s.length) { el.innerHTML = '<div class="no-data">Stash пуст — оцени предмет выше и добавь его сюда</div>'; return; }
+  let totNowEx = 0, totAddEx = 0;
+  const data = s.map(x => {
+    const mkt = marketByText[x.name];
+    const unit = mkt ? mkt.CurrentPrice : x.addPriceEx;
+    const now = unit * x.qty, was = x.addPriceEx * x.qty;
+    totNowEx += now; totAddEx += was;
+    const d = was > 0 ? (now - was) / was * 100 : 0;
+    const a = mkt ? adviseItem(mkt) : null;
+    // ранг срочности: 0 продавать сейчас … 4 держать, 5 нет данных
+    const rank = !a ? 5 : a.score <= -3 ? 0 : a.score <= -1 ? 1 : a.score >= 3 ? 4 : a.score >= 1 ? 3 : 2;
+    return { x, unit, now, d, a, rank };
+  });
+  if (stashSort.key) {
+    const { key, dir } = stashSort;
+    data.sort((A, B) => {
+      if (key === 'name') return A.x.name.localeCompare(B.x.name) * dir;
+      const v = r => key === 'qty' ? r.x.qty : key === 'unit' ? r.unit : key === 'now' ? r.now : key === 'delta' ? r.d : r.rank;
+      return (v(A) - v(B)) * dir;
+    });
+  }
+  const arr = k => stashSort.key === k ? (stashSort.dir === 1 ? ' ↑' : ' ↓') : '';
+  const rows = data.map(({ x, unit, now, d, a }) => {
+    const expanded = stashExpanded.has(x.id);
+    const hoverTitle = a ? a.reasons.join('&#10;') : 'нет данных по предмету';
+    const detailRow = expanded && a ? `<tr><td colspan="7" style="background:#faf8ff;padding:8px 16px">
+        ${a.reasons.map(r => `<div class="pc-reason">${r}</div>`).join('')}
+        <div class="pc-reason" style="color:#aaa">Оценка по 7-дневной динамике poe2scout.</div>
+      </td></tr>` : '';
+    return `<tr>
+      <td class="sort" onclick="stashToggle(${x.id})" title="${hoverTitle}">
+        <div class="item-name">${expanded ? '▾' : '▸'} ${x.name}</div>
+        <div class="item-cat">добавлен ${x.ts} · клик — обоснование</div>
+      </td>
+      <td>${x.qty} шт</td>
+      <td><div class="price-now">${unit.toFixed(unit<10?2:1)} ex</div><div class="bid-sub">${toDiv(unit).toFixed(3)} div · ${toC(unit).toFixed(1)} c</div></td>
+      <td><div class="price-now">${toDiv(now).toFixed(2)} div</div><div class="bid-sub">${now.toFixed(0)} ex · ${toC(now).toFixed(0)} c</div></td>
+      <td><span class="${d>=0?'pnl-pos':'pnl-neg'}">${d>=0?'+':''}${d.toFixed(1)}%</span><div class="bid-sub">с добавления</div></td>
+      <td>${a ? `<span style="font-size:11px;font-weight:700" class="${a.cls==='verdict-sell'?'pnl-neg':a.cls==='verdict-hold'?'pnl-pos':'pnl-na'}">${a.verdict}</span>` : '<span class="pnl-na">нет данных</span>'}</td>
+      <td><button class="tr-del" onclick="stashDel(${x.id})" title="продано / убрать">✕</button></td>
+    </tr>${detailRow}`;
+  }).join('');
+  const dTot = totAddEx > 0 ? (totNowEx - totAddEx) / totAddEx * 100 : 0;
+  el.innerHTML = `<div style="overflow-x:auto"><table>
+    <thead><tr>
+      <th class="sort" onclick="setStashSort('name')">Предмет${arr('name')}</th>
+      <th class="sort" onclick="setStashSort('qty')">Кол-во${arr('qty')}</th>
+      <th class="sort" onclick="setStashSort('unit')">Цена/шт${arr('unit')}</th>
+      <th class="sort" onclick="setStashSort('now')">Стак сейчас${arr('now')}</th>
+      <th class="sort" onclick="setStashSort('delta')">Δ${arr('delta')}</th>
+      <th class="sort" onclick="setStashSort('verdict')">Рекомендация${arr('verdict')}</th>
+      <th></th>
+    </tr></thead>
+    <tbody>${rows}</tbody></table></div>
+    <div class="pf-summary">
+      <div class="pf-summary-item">💎 Стеш сейчас: <span>${toDiv(totNowEx).toFixed(2)} div · ${fmtC(totNowEx,0)} · ${totNowEx.toFixed(0)} ex</span></div>
+      <div class="pf-summary-item">Δ с добавления: <span class="${dTot>=0?'pnl-pos':'pnl-neg'}">${dTot>=0?'+':''}${toDiv(totNowEx-totAddEx).toFixed(2)} div (${dTot.toFixed(1)}%)</span></div>
+    </div>`;
+}
+
+/* ── Data layer ──
+   В Cowork данные идут через MCP (window.cowork). Standalone (GitHub Pages и т.п.) —
+   напрямую из публичного API poe2scout: /api/poe2/Leagues/{league}/Currencies/ByCategory.
+   Формат Items идентичен MCP-ответу. */
+const API_BASE = 'https://poe2scout.com/api/poe2/Leagues/' + encodeURIComponent(LEAGUE);
+
+async function fetchCategory(cat) {
+  if (window.cowork?.callMcpTool) {
+    try {
+      const r = await window.cowork.callMcpTool('mcp__poe2scout-mcp__get_currency_items', { category: cat, league: LEAGUE, limit: 100 });
+      if (!r || r.isError) return [];
+      const d = r.structuredContent ?? (r.content?.[0] ? JSON.parse(r.content[0].text) : []);
+      return Array.isArray(d) ? d : [];
+    } catch { return []; }
+  }
+  try {
+    const resp = await fetch(`${API_BASE}/Currencies/ByCategory?Category=${encodeURIComponent(cat)}&Page=1&PerPage=250`);
+    if (!resp.ok) return [];
+    const d = await resp.json();
+    return Array.isArray(d?.Items) ? d.Items : [];
+  } catch { return []; }
+}
+
+/* ── JS-пароль для standalone-версии (в Cowork не запрашивается).
+   Это лишь лёгкий заслон от случайных глаз: проверка на клиенте, обходится через devtools. */
+(function pwGate() {
+  if (window.cowork?.callMcpTool) return;
+  if (sessionStorage.getItem('poe2_auth') === '1') return;
+  const ov = document.createElement('div');
+  ov.id = 'pw-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:linear-gradient(135deg,#1a1a2e,#16213e);z-index:9999;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px';
+  ov.innerHTML = `
+    <div style="color:#c9a84c;font-size:20px;font-weight:700">⚔️ PoE2 Market · Runes of Aldur</div>
+    <input id="pw-inp" type="password" placeholder="пароль" autocomplete="off"
+      style="padding:9px 14px;border-radius:8px;border:1px solid #c9a84c55;background:#ffffff12;color:#ffd700;outline:none;text-align:center;font-size:15px">
+    <div id="pw-err" style="color:#f44336;font-size:12px;height:15px"></div>`;
+  document.body.appendChild(ov);
+  const inp = ov.querySelector('#pw-inp');
+  inp.addEventListener('keydown', e => {
+    if (e.key !== 'Enter') return;
+    if (inp.value === 'biba1') { sessionStorage.setItem('poe2_auth', '1'); ov.remove(); }
+    else { ov.querySelector('#pw-err').textContent = 'неверный пароль'; inp.value = ''; }
+  });
+  setTimeout(() => inp.focus(), 100);
+})();
+
+/* ── Main (v3) ── */
+async function loadAll() {
+  document.getElementById('root').innerHTML = `<div class="loading"><div class="spinner"></div><br>Загружаем данные с poe2scout...</div>`;
+  document.getElementById('updated').textContent = 'Загружается...';
+  document.getElementById('divine-rate').textContent = '...';
+  const crReset = document.getElementById('chaos-rate');
+  if (crReset) crReset.textContent = '...';
+
+  try {
+    const cats = ['currency','fragments','runes','essences','breach','delirium','lineagesupportgems','incursion','ritual','abyss','verisium'];
+    const results = await Promise.all(cats.map(cat => fetchCategory(cat)));
+
+    const byCategory = {};
+    cats.forEach((cat, i) => { byCategory[cat] = results[i]; });
+
+    const currency    = byCategory['currency'];
+    const allCurrency = cats.flatMap(c => byCategory[c]);
+
+    const divItem = currency.find(c => c.ApiId === 'divine');
+    if (divItem?.CurrentPrice > 0) divinePrice = divItem.CurrentPrice;
+    const chaosItem = currency.find(c => c.ApiId === 'chaos');
+    if (chaosItem?.CurrentPrice > 0) chaosPrice = chaosItem.CurrentPrice;
+    document.getElementById('divine-rate').textContent = divinePrice.toFixed(1);
+    const crEl = document.getElementById('chaos-rate');
+    if (crEl) crEl.textContent = chaosPrice.toFixed(1);
+
+    // каталог всех предметов для автоподстановки и рыночных цен трекера
+    marketByText = {};
+    allCurrency.forEach(it => { if (it.Text) marketByText[it.Text] = it; });
+
+    const excludeIds = new Set(['divine','mirror','exalted']);
+    const minEx = divinePrice; // порог 1 div
+
+    allValidItems = allCurrency
+      .filter(it => it.CurrentPrice >= minEx && safeLogs(it.PriceLogs).length >= 2
+        && !excludeIds.has(it.ApiId)
+        && !(it.ApiId.startsWith('perfect-') && it.ApiId.endsWith('-rune')))
+      .map(it => ({
+        ...it,
+        _flip: calcFlipScore(it.PriceLogs, it.CurrentPrice),
+        _inv:  calcInvestScore(it.PriceLogs),
+      }));
+
+    const now = new Date().toLocaleTimeString('ru', { hour:'2-digit', minute:'2-digit' });
+    document.getElementById('updated').textContent = `Обновлено в ${now} · poe2scout.com`;
+
+    const runesItems     = byCategory['runes']     || [];
+    const fragmentsItems = byCategory['fragments'] || [];
+    const incursionItems = byCategory['incursion'] || [];
+
+    document.getElementById('root').innerHTML = `
+      <div class="main-tabs">
+        <button class="main-tab ${mainTab==='market'?'active':''}" id="mt-market" onclick="switchMainTab('market')">📈 Рынок</button>
+        <button class="main-tab ${mainTab==='price'?'active':''}" id="mt-price" onclick="switchMainTab('price')">🔎 Price Check</button>
+        <button class="main-tab ${mainTab==='help'?'active':''}" id="mt-help" onclick="switchMainTab('help')">📖 Инструкция</button>
+      </div>
+      <div id="tab-help" style="display:${mainTab==='help'?'':'none'}">
+        <div class="content">
+          <div class="card"><div class="card-header" style="background:#e8eaf6;color:#283593">📖 Как пользоваться дашбордом</div>
+          <div style="padding:14px 16px;font-size:13px;line-height:1.55;color:#333">
+
+            <p><b>Источник данных.</b> Все цены — с poe2scout.com (лига Runes of Aldur), в exalted orbs. История — дневные средние за 7 дней плюс живая текущая цена. Данные обновляются кнопкой «↺ Обновить» или кнопкой Reload в шапке окна артефакта.</p>
+
+            <p style="margin-top:10px"><b>Шапка.</b> Поля 💰 — твои свободные средства в div, ex и chaos: они суммируются по живым курсам в общий бюджет, от которого считаются портфель, фильтр «по карману» и колонка «Кол-во» в таблицах. Селектор 👤 — профили: у каждого профиля свой стеш и свой журнал сделок (бюджет и настройки общие). Чтобы создать профиль, выбери «➕ новый…», введи имя и нажми «ок».</p>
+
+            <p style="margin-top:10px"><b>💼 Рекомендованный портфель.</b> Делит бюджет между флипом и инвестом (слайдер), внутри корзины — пропорционально скору позиций, остаток докупается жадно. Переключатель «Ордеры в: ex / div / chaos» задаёт валюту котирования: тоталы всегда целые, как требует биржа. Строка позиции: «закупка N шт за X» — ставь buy-ордер по этим числам, «продажа/цель» — sell-ордер. Значок ⚠ значит, что шаг цены в выбранной валюте крупнее реальной маржи — такой ордер может висеть долго, переключись на ex. «Остаток» в сводке — неразменянный хвост меньше самой дешёвой позиции.</p>
+
+            <p style="margin-top:10px"><b>🔄 Топ флип.</b> Кандидаты на быструю перепродажу. Скор = волатильность за 3 дня × ликвидность × качество точки входа. Фильтры: цена от 1 div, маржа от 10%, от 20 сделок/день. «Купить по» = текущая −2% (лимитка под рынком), «Продать по» = максимум за 3 дня, но не выше +10% от текущей. «Точка входа»: ⬇ хорошо — цена у низа трёхдневного диапазона, ⬆ высоко — у верха (покупать рискованно).</p>
+
+            <p style="margin-top:10px"><b>📦 Долгосрочные вложения.</b> Предметы в устойчивом росте: 7-дневный тренд × консистентность роста × ликвидность, с бонусом за ускорение. «Цель +3д» — линейная экстраполяция дневного прироста, ограничена +50% (параболы не экстраполируются честно). Вкладки категорий есть у обеих таблиц.</p>
+
+            <p style="margin-top:10px"><b>⚗️ Крафт арбитраж.</b> Рецепты, где собрать дешевле, чем купить готовое: Origin Core (Cradle + Spark), Simulacrum и Breachstone из 300 сплинтеров, Perfect Runes (Greater + Masterwork + Orb of Extraction — цена Greater берётся с трейда вручную). Учитывай голд-комиссию биржи и время сборки.</p>
+
+            <p style="margin-top:10px"><b>📒 Журнал сделок.</b> Ручной лог покупок/продаж с автоподстановкой названия. Цена за штуку в любой валюте — курс фиксируется в момент записи. P&L: реализованный считается от средней цены закупки, нереализованный — по живой рыночной цене открытого остатка. ⚠ у строки — продано больше, чем куплено (часть выручки без базы).</p>
+
+            <p style="margin-top:10px"><b>🔎 Price Check.</b> Наведи курсор на предмет в игре, нажми Ctrl+C, потом кликни в поле и нажми Ctrl+V — оценка запустится сама (кнопка «Из буфера» работает, если браузер разрешает чтение буфера). Распознаются название и Stack Size. Ответ: цена за штуку и за стак в ex/div/chaos и вердикт от «продавать сейчас» до «держать».</p>
+
+            <p style="margin-top:6px"><b>Как строится рекомендация.</b> Сумма шести сигналов: 7д-тренд (рост +15..50% — за держать; перегрев &gt;+50% и падение &lt;−15% — за продажу), разворот (7д рос, а 3д уже в минусе — сильный сигнал продажи), движение за 24ч (просадка &gt;3% после роста — окно фиксации), позиция в 7-дневном диапазоне (у максимума — выгодно продать, у дна без падения — невыгодно), динамика предложения (объём упал — дефицит держит цену, вырос — давит) и ликвидность (меньше 20 сделок/день — продажа затянется). Каждый сигнал виден в обосновании. Оценка чисто статистическая: патчи, анонсы и конец лиги она не знает.</p>
+
+            <p style="margin-top:10px"><b>📦 Stash.</b> Кнопка «+ В Stash» сохраняет оценённый предмет. Цены и рекомендации пересчитываются живыми при каждом обновлении; Δ — изменение к цене на момент добавления. Повторное добавление того же предмета обновляет количество (база для Δ сохраняется). Клик по названию раскрывает обоснование, наведение — показывает его в подсказке. Сортировка кликом по заголовку: цены и Δ — сначала по убыванию, рекомендация — по срочности продажи. Продал — убери строку ✕.</p>
+
+            <p style="margin-top:10px"><b>Ограничения.</b> История — дневные свечи, внутридневные движения не видны. Биржа берёт комиссию голдом — в расчётах её нет. Цены маленьких предметов в div округляются крупными шагами — для них котируй в ex. Все «ожидаемые прибыли» — оценки по историческим ценам, не гарантия.</p>
+          </div></div>
+        </div>
+      </div>
+      <div id="tab-price" style="display:${mainTab==='price'?'':'none'}">
+        <div class="content">
+          <div class="card">
+            <div class="card-header" style="background:#e0f2f1;color:#00695c">🔎 Price Check <span class="badge" style="background:#00897b;color:#fff;margin-left:auto">Ctrl+C</span></div>
+            <div class="pc-form">
+              <textarea id="pc-input" onpaste="setTimeout(pcEvaluate, 60)" placeholder="Кликни сюда и нажми Ctrl+V — оценка запустится сама&#10;&#10;Item Class: Stackable Currency&#10;Rarity: Currency&#10;Greater Chaos Orb&#10;--------&#10;Stack Size: 18/20&#10;..."></textarea>
+              <div style="display:flex;flex-direction:column;gap:6px">
+                <button class="tr-btn" style="background:#00897b" onclick="pcPaste()">📋 Из буфера</button>
+                <button class="tr-btn" onclick="pcEvaluate()">Оценить</button>
+              </div>
+            </div>
+            <div id="pc-result"></div>
+          </div>
+          <div class="card">
+            <div class="card-header" style="background:#fff3e0;color:#e65100">📦 Stash <span class="badge" style="background:#ff9800;color:#fff;margin-left:auto" id="stash-count"></span></div>
+            <div id="pc-stash"></div>
+          </div>
+        </div>
+      </div>
+      <div id="tab-market" style="display:${mainTab==='market'?'':'none'}">
+      <div class="content">
+        <div class="portfolio-block">
+          <div class="card-header">💼 Рекомендованный портфель <span class="badge" style="background:#c9a84c;color:#1a1a2e;margin-left:auto">AI</span></div>
+          <div id="portfolio-content"></div>
+        </div>
+        <div class="tracker-block">
+          <div class="card-header">📒 Журнал сделок <span class="badge" style="background:#7b1fa2;color:#fff;margin-left:auto">P&L</span></div>
+          <div id="tracker-content"></div>
+          <datalist id="items-dl">${Object.keys(marketByText).sort().map(n => `<option value="${n.replace(/"/g,'&quot;')}">`).join('')}</datalist>
+        </div>
+        <div class="cards-row">
+          <div class="card">
+            <div class="card-header flip">🔄 Топ флип <span class="badge badge-flip">10</span></div>
+            <div class="cat-tabs" id="flip-tabs">${catTabsHtml('flip', flipCat)}</div>
+            <div id="flip-content"></div>
+          </div>
+          <div class="card">
+            <div class="card-header invest">📦 Долгосрочные вложения <span class="badge badge-invest">10</span></div>
+            <div class="cat-tabs" id="invest-tabs">${catTabsHtml('invest', investCat)}</div>
+            <div id="invest-content"></div>
+          </div>
+        </div>
+        ${renderCraftBlock(runesItems, fragmentsItems, incursionItems)}
+        <div class="card">
+          <div class="card-header rates">💰 Курсы валют <span class="badge badge-rates">в div</span></div>
+          <div class="rates-grid">${renderRates(currency)}</div>
+        </div>
+      </div>
+      </div>`;
+
+    renderTables();
+    renderPortfolio();
+    renderTracker();
+    renderStash();
+
+  } catch(e) {
+    document.getElementById('root').innerHTML = `<div class="error-msg">Ошибка: ${e.message}</div>`;
+  }
+}
+
+refreshProfileSel();
+loadAll();
+</script>
+</body>
+</html>
