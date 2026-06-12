@@ -155,6 +155,10 @@ tr:hover td { background: #fafaf8; }
 .pf-summary-item span { font-weight: 700; color: #1a1a2e; }
 .pf-no-budget { padding: 20px; text-align: center; color: #aaa; font-size: 12px; }
 
+/* Collapsible sections */
+.coll-chev { margin-right: 5px; color: inherit; opacity: .6; font-size: 11px; }
+.card-header.coll { cursor: pointer; user-select: none; }
+
 /* Main tabs */
 .main-tabs { display: flex; gap: 6px; padding: 10px 13px 0; }
 .main-tab { padding: 6px 16px; border-radius: 8px 8px 0 0; border: 1px solid #e0ddd8; border-bottom: none; background: #eceae5; color: #777; cursor: pointer; font-size: 13px; font-weight: 600; }
@@ -581,21 +585,26 @@ function renderTables() {
 }
 
 function renderRates(items) {
-  return [...items]
-    .filter(it => it.CurrentPrice > 0 && safeLogs(it.PriceLogs).length > 1)
+  // divine / chaos / exalted всегда первыми, дальше топ по цене
+  const pinnedIds = ['divine', 'chaos', 'exalted'];
+  const pinned = pinnedIds.map(id => items.find(it => it.ApiId === id)).filter(Boolean);
+  const rest = [...items]
+    .filter(it => it.CurrentPrice > 0 && !pinnedIds.includes(it.ApiId) && safeLogs(it.PriceLogs).length > 1)
     .sort((a,b) => b.CurrentPrice - a.CurrentPrice)
-    .slice(0, 20)
-    .map(it => {
-      const t = trendPct(it.PriceLogs, 3);
-      const flat = t === null || Math.abs(t) < 0.5;
-      const cls = flat ? 'trend-flat' : t > 0 ? 'trend-up' : 'trend-down';
-      const arr = flat ? '~' : t > 0 ? '▲' : '▼';
-      return `<div class="rate-item">
-        <div class="r-name" title="${it.Text}">${it.Text}</div>
-        <div class="r-val">${toDiv(it.CurrentPrice).toFixed(2)}<span style="font-size:10px;color:#aaa"> div</span></div>
-        <div class="r-change"><span class="${cls}">${t!==null?arr+' '+Math.abs(t).toFixed(0)+'%':''}</span></div>
-      </div>`;
-    }).join('');
+    .slice(0, 17);
+  return [...pinned, ...rest].map(it => {
+    const t = trendPct(it.PriceLogs, 3);
+    const flat = t === null || Math.abs(t) < 0.5;
+    const cls = flat ? 'trend-flat' : t > 0 ? 'trend-up' : 'trend-down';
+    const arr = flat ? '~' : t > 0 ? '▲' : '▼';
+    const ex = it.CurrentPrice;
+    return `<div class="rate-item">
+      <div class="r-name" title="${it.Text}">${it.Text}</div>
+      <div class="r-val">${toDiv(ex).toFixed(ex < divinePrice ? 3 : 2)}<span style="font-size:10px;color:#aaa"> div</span></div>
+      <div style="font-size:10px;color:#888">${ex.toFixed(ex < 10 ? 2 : 1)} ex · ${toC(ex).toFixed(1)} c</div>
+      <div class="r-change"><span class="${cls}">${t!==null?arr+' '+Math.abs(t).toFixed(0)+'%':''}</span></div>
+    </div>`;
+  }).join('');
 }
 
 /* ── Craft arbitrage block ── */
@@ -741,9 +750,11 @@ function renderCraftBlock(runesItems, fragmentsItems, incursionItems) {
 
   const total = profitableFragRecipes.length + perfectRunes.length;
   return `<div class="craft-block">
-    <div class="card-header">⚗️ Крафт арбитраж <span class="badge badge-craft" style="margin-left:auto">${total} рецептов</span></div>
-    <div class="craft-note">Только проверенные рецепты. Учитывай комиссию биржи в голде и риск изменения цены за время сборки.</div>
-    ${sections.join('')}
+    <div class="card-header coll" onclick="toggleSec('craft')">${chev('craft')}⚗️ Крафт арбитраж <span class="badge badge-craft" style="margin-left:auto">${total} рецептов</span></div>
+    <div id="sec-craft" style="${secStyle('craft')}">
+      <div class="craft-note">Только проверенные рецепты. Учитывай комиссию биржи в голде и риск изменения цены за время сборки.</div>
+      ${sections.join('')}
+    </div>
   </div>`;
 }
 
@@ -1051,6 +1062,22 @@ function renderTracker(keepItem) {
 let mainTab = 'market';
 let pcLast = null;
 
+/* Сворачиваемые секции: состояние в localStorage */
+let collapsedSecs = new Set((() => {
+  try { const a = JSON.parse(localStorage.getItem('poe2_collapsed') || '[]'); return Array.isArray(a) ? a : []; }
+  catch { return []; }
+})());
+function toggleSec(key) {
+  if (collapsedSecs.has(key)) collapsedSecs.delete(key); else collapsedSecs.add(key);
+  localStorage.setItem('poe2_collapsed', JSON.stringify([...collapsedSecs]));
+  const body = document.getElementById('sec-' + key);
+  if (body) body.style.display = collapsedSecs.has(key) ? 'none' : '';
+  const ch = document.getElementById('chev-' + key);
+  if (ch) ch.textContent = collapsedSecs.has(key) ? '▸' : '▾';
+}
+function chev(key) { return `<span class="coll-chev" id="chev-${key}">${collapsedSecs.has(key) ? '▸' : '▾'}</span>`; }
+function secStyle(key) { return collapsedSecs.has(key) ? 'display:none' : ''; }
+
 function switchMainTab(t) {
   mainTab = t;
   ['market', 'price', 'help'].forEach(k => {
@@ -1327,20 +1354,33 @@ async function fetchCategory(cat) {
   return Array.isArray(d?.Items) ? d.Items : [];
 }
 
-// Браузер с чужого домена может упереться в CORS — пробуем напрямую, затем через прокси
+// Браузер с чужого домена может упереться в CORS — пробуем напрямую, затем через прокси.
+// corsproxy.io официально бесплатен для github.io; allorigins — запасной.
+async function fetchWithTimeout(u, ms) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), ms);
+  try { return await fetch(u, { signal: ctrl.signal, cache: 'no-store' }); }
+  finally { clearTimeout(t); }
+}
 async function fetchJsonCors(url) {
+  const attempts = [
+    url,
+    'https://corsproxy.io/?url=' + encodeURIComponent(url),
+    'https://api.allorigins.win/raw?url=' + encodeURIComponent(url),
+  ];
+  for (const u of attempts) {
+    try {
+      const r = await fetchWithTimeout(u, 12000);
+      if (!r.ok) continue;
+      const d = await r.json();
+      if (d) return d;
+    } catch (e) { console.warn('fetch fail:', u.slice(0, 60), e.message); }
+  }
+  // allorigins /get оборачивает ответ в {contents:"..."}
   try {
-    const r = await fetch(url);
-    if (r.ok) return await r.json();
-  } catch {}
-  try {
-    const r = await fetch('https://corsproxy.io/?url=' + encodeURIComponent(url));
-    if (r.ok) return await r.json();
-  } catch {}
-  try {
-    const r = await fetch('https://api.allorigins.win/raw?url=' + encodeURIComponent(url));
-    if (r.ok) return await r.json();
-  } catch {}
+    const r = await fetchWithTimeout('https://api.allorigins.win/get?url=' + encodeURIComponent(url), 15000);
+    if (r.ok) { const w = await r.json(); if (w?.contents) return JSON.parse(w.contents); }
+  } catch (e) { console.warn('allorigins/get fail:', e.message); }
   return null;
 }
 
@@ -1463,7 +1503,8 @@ async function loadAll() {
       <div id="tab-price" style="display:${mainTab==='price'?'':'none'}">
         <div class="content">
           <div class="card">
-            <div class="card-header" style="background:#e0f2f1;color:#00695c">🔎 Price Check <span class="badge" style="background:#00897b;color:#fff;margin-left:auto">Ctrl+C</span></div>
+            <div class="card-header coll" style="background:#e0f2f1;color:#00695c" onclick="toggleSec('pc')">${chev('pc')}🔎 Price Check <span class="badge" style="background:#00897b;color:#fff;margin-left:auto">Ctrl+C</span></div>
+            <div id="sec-pc" style="${secStyle('pc')}">
             <div class="pc-form">
               <textarea id="pc-input" onpaste="setTimeout(pcEvaluate, 60)" placeholder="Кликни сюда и нажми Ctrl+V — оценка запустится сама&#10;&#10;Item Class: Stackable Currency&#10;Rarity: Currency&#10;Greater Chaos Orb&#10;--------&#10;Stack Size: 18/20&#10;..."></textarea>
               <div style="display:flex;flex-direction:column;gap:6px">
@@ -1472,41 +1513,46 @@ async function loadAll() {
               </div>
             </div>
             <div id="pc-result"></div>
+            </div>
           </div>
           <div class="card">
-            <div class="card-header" style="background:#fff3e0;color:#e65100">📦 Stash <span class="badge" style="background:#ff9800;color:#fff;margin-left:auto" id="stash-count"></span></div>
-            <div id="pc-stash"></div>
+            <div class="card-header coll" style="background:#fff3e0;color:#e65100" onclick="toggleSec('stash')">${chev('stash')}📦 Stash <span class="badge" style="background:#ff9800;color:#fff;margin-left:auto" id="stash-count"></span></div>
+            <div id="sec-stash" style="${secStyle('stash')}"><div id="pc-stash"></div></div>
           </div>
         </div>
       </div>
       <div id="tab-market" style="display:${mainTab==='market'?'':'none'}">
       <div class="content">
+        <div class="card">
+          <div class="card-header rates coll" onclick="toggleSec('rates')">${chev('rates')}💰 Курсы валют <span class="badge badge-rates">div · ex · c</span></div>
+          <div id="sec-rates" style="${secStyle('rates')}"><div class="rates-grid">${renderRates(currency)}</div></div>
+        </div>
         <div class="portfolio-block">
-          <div class="card-header">💼 Рекомендованный портфель <span class="badge" style="background:#c9a84c;color:#1a1a2e;margin-left:auto">AI</span></div>
-          <div id="portfolio-content"></div>
+          <div class="card-header coll" onclick="toggleSec('portfolio')">${chev('portfolio')}💼 Рекомендованный портфель <span class="badge" style="background:#c9a84c;color:#1a1a2e;margin-left:auto">AI</span></div>
+          <div id="sec-portfolio" style="${secStyle('portfolio')}"><div id="portfolio-content"></div></div>
         </div>
         <div class="tracker-block">
-          <div class="card-header">📒 Журнал сделок <span class="badge" style="background:#7b1fa2;color:#fff;margin-left:auto">P&L</span></div>
-          <div id="tracker-content"></div>
+          <div class="card-header coll" onclick="toggleSec('tracker')">${chev('tracker')}📒 Журнал сделок <span class="badge" style="background:#7b1fa2;color:#fff;margin-left:auto">P&L</span></div>
+          <div id="sec-tracker" style="${secStyle('tracker')}"><div id="tracker-content"></div></div>
           <datalist id="items-dl">${Object.keys(marketByText).sort().map(n => `<option value="${n.replace(/"/g,'&quot;')}">`).join('')}</datalist>
         </div>
         <div class="cards-row">
           <div class="card">
-            <div class="card-header flip">🔄 Топ флип <span class="badge badge-flip">10</span></div>
-            <div class="cat-tabs" id="flip-tabs">${catTabsHtml('flip', flipCat)}</div>
-            <div id="flip-content"></div>
+            <div class="card-header flip coll" onclick="toggleSec('flip')">${chev('flip')}🔄 Топ флип <span class="badge badge-flip">10</span></div>
+            <div id="sec-flip" style="${secStyle('flip')}">
+              <div class="cat-tabs" id="flip-tabs">${catTabsHtml('flip', flipCat)}</div>
+              <div id="flip-content"></div>
+            </div>
           </div>
           <div class="card">
-            <div class="card-header invest">📦 Долгосрочные вложения <span class="badge badge-invest">10</span></div>
-            <div class="cat-tabs" id="invest-tabs">${catTabsHtml('invest', investCat)}</div>
-            <div id="invest-content"></div>
+            <div class="card-header invest coll" onclick="toggleSec('invest')">${chev('invest')}📦 Долгосрочные вложения <span class="badge badge-invest">10</span></div>
+            <div id="sec-invest" style="${secStyle('invest')}">
+              <div class="cat-tabs" id="invest-tabs">${catTabsHtml('invest', investCat)}</div>
+              <div id="invest-content"></div>
+            </div>
           </div>
         </div>
         ${renderCraftBlock(runesItems, fragmentsItems, incursionItems)}
-        <div class="card">
-          <div class="card-header rates">💰 Курсы валют <span class="badge badge-rates">в div</span></div>
-          <div class="rates-grid">${renderRates(currency)}</div>
-        </div>
       </div>
       </div>`;
 
