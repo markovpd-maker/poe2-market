@@ -216,6 +216,7 @@ th.sort:hover { color: #333; }
         <input id="profile-new-inp" class="budget-input" style="width:90px;text-align:left" placeholder="имя профиля">
         <button class="btn-refresh" onclick="createProfile()">ок</button>
       </span>
+      <button class="btn-refresh" id="profile-del" onclick="deleteProfile()" title="удалить текущий профиль (стеш и журнал тоже удалятся)">🗑</button>
     </div>
     <div class="budget-wrap" title="Свободные средства — суммируются в общий бюджет">
       <label>💰</label>
@@ -319,6 +320,35 @@ function setProfile(name) {
   refreshProfileSel();
   renderTracker(true);
   renderStash();
+}
+
+// Удаление профиля: двухшаговое подтверждение (первый клик «взводит» кнопку на 3 сек)
+let profileDelArmed = null;
+function deleteProfile() {
+  const btn = document.getElementById('profile-del');
+  const ps = getProfiles();
+  if (ps.length <= 1) {
+    btn.textContent = 'последний нельзя';
+    setTimeout(() => { btn.textContent = '🗑'; }, 1800);
+    return;
+  }
+  if (profileDelArmed !== activeProfile) {
+    profileDelArmed = activeProfile;
+    btn.textContent = `удалить «${activeProfile}»?`;
+    setTimeout(() => {
+      profileDelArmed = null;
+      const b = document.getElementById('profile-del');
+      if (b) b.textContent = '🗑';
+    }, 3000);
+    return;
+  }
+  profileDelArmed = null;
+  localStorage.removeItem(tradesKey());
+  localStorage.removeItem(stashKey());
+  const rest = ps.filter(p => p !== activeProfile);
+  saveProfiles(rest);
+  btn.textContent = '🗑';
+  setProfile(rest[0]);
 }
 
 // Общий бюджет в exalted: div + ex + chaos по текущим курсам
@@ -1292,12 +1322,26 @@ async function fetchCategory(cat) {
       return Array.isArray(d) ? d : [];
     } catch { return []; }
   }
+  const url = `${API_BASE}/Currencies/ByCategory?Category=${encodeURIComponent(cat)}&Page=1&PerPage=250`;
+  const d = await fetchJsonCors(url);
+  return Array.isArray(d?.Items) ? d.Items : [];
+}
+
+// Браузер с чужого домена может упереться в CORS — пробуем напрямую, затем через прокси
+async function fetchJsonCors(url) {
   try {
-    const resp = await fetch(`${API_BASE}/Currencies/ByCategory?Category=${encodeURIComponent(cat)}&Page=1&PerPage=250`);
-    if (!resp.ok) return [];
-    const d = await resp.json();
-    return Array.isArray(d?.Items) ? d.Items : [];
-  } catch { return []; }
+    const r = await fetch(url);
+    if (r.ok) return await r.json();
+  } catch {}
+  try {
+    const r = await fetch('https://corsproxy.io/?url=' + encodeURIComponent(url));
+    if (r.ok) return await r.json();
+  } catch {}
+  try {
+    const r = await fetch('https://api.allorigins.win/raw?url=' + encodeURIComponent(url));
+    if (r.ok) return await r.json();
+  } catch {}
+  return null;
 }
 
 /* ── JS-пароль для standalone-версии (в Cowork не запрашивается).
@@ -1340,6 +1384,14 @@ async function loadAll() {
 
     const currency    = byCategory['currency'];
     const allCurrency = cats.flatMap(c => byCategory[c]);
+
+    if (!allCurrency.length) {
+      document.getElementById('root').innerHTML = `<div class="error-msg">
+        Не удалось загрузить данные с poe2scout.<br>
+        Возможные причины: API недоступен, либо CORS-прокси (corsproxy.io / allorigins.win) не отвечают.
+        Попробуй «↺ Обновить» через минуту.</div>`;
+      return;
+    }
 
     const divItem = currency.find(c => c.ApiId === 'divine');
     if (divItem?.CurrentPrice > 0) divinePrice = divItem.CurrentPrice;
