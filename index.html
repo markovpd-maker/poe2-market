@@ -210,7 +210,11 @@ th.sort:hover { color: #333; }
 /* Uniques */
 .uniq-block .card-header { background: #fde7f3; color: #880e4f; }
 .cat-tab.active-uniq { background: #ad1457; border-color: #ad1457; color: #fff; font-weight: 600; }
-.uniq-icon { width: 26px; height: 26px; image-rendering: pixelated; flex-shrink: 0; }
+.uniq-icon { width: 30px; height: 30px; object-fit: contain; flex-shrink: 0; }
+/* единый стиль иконок предметов: object-fit:contain не искажает неквадратные иконки PoE2 */
+.item-ico { width: 26px; height: 26px; object-fit: contain; flex-shrink: 0; vertical-align: middle; }
+.name-with-ico { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.name-with-ico > div { min-width: 0; }
 .uniq-name { font-weight: 700; font-size: 12px; color: #880e4f; }
 .uniq-base { font-size: 10px; color: #aaa; }
 .liq-badge { font-size: 10px; padding: 1px 6px; border-radius: 8px; font-weight: 600; white-space: nowrap; }
@@ -225,7 +229,7 @@ th.sort:hover { color: #333; }
 .pcx-select:focus { border-color: #00897b; }
 .pcx-body { padding: 13px; }
 .pcx-head { display: flex; align-items: center; gap: 11px; flex-wrap: wrap; margin-bottom: 10px; }
-.pcx-head img { width: 40px; height: 40px; image-rendering: pixelated; }
+.pcx-head img { width: 44px; height: 44px; object-fit: contain; }
 .pcx-title { font-size: 16px; font-weight: 700; color: #1a1a2e; }
 .pcx-subtitle { font-size: 11px; color: #999; }
 .pcx-prices { display: flex; gap: 10px; flex-wrap: wrap; margin: 6px 0 12px; }
@@ -428,6 +432,14 @@ function fmtD(ex, dec=2) { return toDiv(ex).toFixed(dec) + ' div'; }
 function toC(ex) { return ex / chaosPrice; }
 function fmtC(ex, dec=1) { return toC(ex).toFixed(dec) + ' c'; }
 
+// Иконка предмета рядом с названием (object-fit:contain — без искажений). По имени берёт url из каталога.
+function icoImg(url, px) {
+  if (!url) return '';
+  const st = px ? ` style="width:${px}px;height:${px}px"` : '';
+  return `<img class="item-ico"${st} src="${url}" loading="lazy" onerror="this.style.display='none'" alt="">`;
+}
+function icoByName(name, px) { return icoImg(marketByText[name] ? marketByText[name].IconUrl : '', px); }
+
 function safeLogs(logs) {
   if (!Array.isArray(logs)) return [];
   // PriceLogs приходят НОВЫЕ→СТАРЫЕ (проверено: [0] = сегодня)
@@ -588,7 +600,7 @@ function renderFlipTable(items) {
     const unitsTd = showUnits ? `<td>${units!==null?`<span class="units-badge">× ${units}</span>`:''}</td>` : '';
     return `<tr>
       <td><span class="rank ${i<3?'top3':''}">${i+1}</span></td>
-      <td><div class="item-name">${it.Text}</div><div class="item-cat">${CAT_LABELS[it.CategoryApiId]||it.CategoryApiId}</div></td>
+      <td><div class="name-with-ico">${icoImg(it.IconUrl)}<div><div class="item-name">${it.Text}</div><div class="item-cat">${CAT_LABELS[it.CategoryApiId]||it.CategoryApiId}</div></div></div></td>
       <td><div class="price-now">${fmtD(it.CurrentPrice)}</div></td>
       <td><div class="bid-buy">${buyTxt}</div><div class="bid-sub">−2% от рынка</div></td>
       <td><div class="bid-sell">${sellTxt}</div><div class="bid-sub">3д max, cap +10%</div></td>
@@ -622,7 +634,7 @@ function renderInvestTable(items) {
     const unitsTd = showUnits ? `<td>${units!==null?`<span class="units-badge">× ${units}</span>`:''}</td>` : '';
     return `<tr>
       <td><span class="rank ${i<3?'top3':''}">${i+1}</span></td>
-      <td><div class="item-name">${it.Text}</div><div class="item-cat">${CAT_LABELS[it.CategoryApiId]||it.CategoryApiId}</div></td>
+      <td><div class="name-with-ico">${icoImg(it.IconUrl)}<div><div class="item-name">${it.Text}</div><div class="item-cat">${CAT_LABELS[it.CategoryApiId]||it.CategoryApiId}</div></div></div></td>
       <td><div class="price-now">${fmtD(it.CurrentPrice)}</div></td>
       <td><div class="bid-buy">${buyTxt}</div><div class="bid-sub">−2% от рынка</div></td>
       <td><div class="bid-sell">${targTxt}</div><div class="bid-sub">экстрапол., cap +50%</div></td>
@@ -660,7 +672,7 @@ function renderRates(items) {
     const arr = flat ? '~' : t > 0 ? '▲' : '▼';
     const ex = it.CurrentPrice;
     return `<div class="rate-item">
-      <div class="r-name" title="${it.Text}">${it.Text}</div>
+      <div class="r-name" title="${it.Text}" style="display:flex;align-items:center;gap:5px">${icoImg(it.IconUrl,18)}<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${it.Text}</span></div>
       <div class="r-val">${toDiv(ex).toFixed(ex < divinePrice ? 3 : 2)}<span style="font-size:10px;color:#aaa"> div</span></div>
       <div style="font-size:10px;color:#888">${ex.toFixed(ex < 10 ? 2 : 1)} ex · ${toC(ex).toFixed(1)} c</div>
       <div class="r-change"><span class="${cls}">${t!==null?arr+' '+Math.abs(t).toFixed(0)+'%':''}</span></div>
@@ -746,7 +758,7 @@ function renderCraftBlock(runesItems, fragmentsItems, incursionItems) {
           <td><span class="rank ${i<3?'top3':''}">${i+1}</span></td>
           <td>
             <div style="display:flex;align-items:center;gap:5px">
-              <img src="${r.icon}" width="18" height="18" style="image-rendering:pixelated" onerror="this.style.display='none'">
+              ${icoImg(r.icon,20)}
               <div class="item-name">${r.name}</div>
             </div>
           </td>
@@ -791,7 +803,7 @@ function renderCraftBlock(runesItems, fragmentsItems, incursionItems) {
         : `<div style="color:#f44336;font-weight:700;font-size:12px">убыток без Greater</div>`;
       return `<tr>
         <td><span class="rank ${i<3?'top3':''}">${i+1}</span></td>
-        <td><div class="item-name">${it.Text}</div><div class="item-cat">Greater ${baseName} Rune (в предмет) → Masterwork → Orb</div></td>
+        <td><div class="name-with-ico">${icoImg(it.IconUrl)}<div><div class="item-name">${it.Text}</div><div class="item-cat">Greater ${baseName} Rune (в предмет) → Masterwork → Orb</div></div></div></td>
         <td><div class="price-now">${fmtD(it.CurrentPrice)}</div></td>
         <td><div style="color:#7b1fa2;font-weight:700;font-size:12px">${mwDiv}</div></td>
         <td><div style="color:#5c1a9e;font-weight:700;font-size:12px">${orbDiv}</div></td>
@@ -930,6 +942,7 @@ function renderPortfolio() {
       const unitSellEx = r.sellTot * cur.rate / r.qty;
       return `<div class="pf-row">
         <div class="pf-num">${i+1}</div>
+        ${icoImg(r.it.IconUrl)}
         <div class="pf-info">
           <div class="pf-name" title="${r.it.Text}">${r.it.Text}</div>
           <div class="pf-detail" style="color:#1565c0;font-weight:600">закупка: ${r.qty} шт за ${r.buyTot} ${cur.label} (≈${unitBuyEx.toFixed(0)} ex/шт)</div>
@@ -1067,7 +1080,7 @@ function renderTracker(keepItem) {
       ? `<span class="${realized>=0?'pnl-pos':'pnl-neg'}">${realized>=0?'+':''}${toDiv(realized).toFixed(2)} div</span>${noBasis?' <span class="pnl-na" title="продано больше чем куплено — часть без базы">⚠</span>':''}`
       : '<span class="pnl-na">—</span>';
     return `<tr>
-      <td><div class="item-name">${name}</div></td>
+      <td><div class="name-with-ico">${icoByName(name)}<div class="item-name">${name}</div></div></td>
       <td>${o.buyQ ? `${o.buyQ} шт · ср. ${fmtD(avgBuy)}` : '—'}</td>
       <td>${o.sellQ ? `${o.sellQ} шт · ср. ${fmtD(o.sellQ ? o.sellEx/o.sellQ : 0)}` : '—'}</td>
       <td>${open > 0 ? `<span class="units-badge">× ${open}</span>` : '—'}</td>
@@ -1080,7 +1093,7 @@ function renderTracker(keepItem) {
   const logRows = [...trades].reverse().map(t => `<tr>
     <td style="white-space:nowrap;color:#aaa;font-size:11px">${t.ts}</td>
     <td><span class="${t.side==='buy'?'tr-side-buy':'tr-side-sell'}">${t.side==='buy'?'Покупка':'Продажа'}</span></td>
-    <td><div class="item-name">${t.item}</div></td>
+    <td><div class="name-with-ico">${icoByName(t.item)}<div class="item-name">${t.item}</div></div></td>
     <td>${t.qty} шт</td>
     <td>${t.price} ${t.cur} <span class="bid-sub">(${fmtD(t.priceEx)}/шт)</span></td>
     <td>${(t.qty*t.price).toFixed(t.cur==='ex'?0:2)} ${t.cur} <span class="bid-sub">≈ ${fmtD(t.qty*t.priceEx,1)}</span></td>
@@ -1267,7 +1280,7 @@ function pcEvaluate() {
   const unit = it.CurrentPrice, stack = unit * qty;
   res.innerHTML = `<div class="pc-res">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap">
-      <img src="${it.IconUrl}" width="28" height="28" style="image-rendering:pixelated" onerror="this.style.display='none'">
+      ${icoImg(it.IconUrl,34)}
       <div>
         <div class="item-name" style="font-size:14px">${it.Text}</div>
         <div class="item-cat">${CAT_LABELS[it.CategoryApiId]||it.CategoryApiId} · ${qty} шт</div>
@@ -1369,8 +1382,10 @@ function renderStash() {
       </td></tr>` : '';
     return `<tr>
       <td class="sort" onclick="stashToggle(${x.id})" title="${hoverTitle}">
-        <div class="item-name">${expanded ? '▾' : '▸'} ${x.name}</div>
-        <div class="item-cat">добавлен ${x.ts} · клик — обоснование</div>
+        <div class="name-with-ico">${icoByName(x.name)}<div>
+          <div class="item-name">${expanded ? '▾' : '▸'} ${x.name}</div>
+          <div class="item-cat">добавлен ${x.ts} · клик — обоснование</div>
+        </div></div>
       </td>
       <td>${x.qty} шт</td>
       <td><div class="price-now">${unit.toFixed(unit<10?2:1)} ex</div><div class="bid-sub">${toDiv(unit).toFixed(3)} div · ${toC(unit).toFixed(1)} c</div></td>
