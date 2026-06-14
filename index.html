@@ -294,34 +294,34 @@ let investCat = 'all';
 let uniqCat   = 'weapon'; // активная вкладка раздела уникалов
 
 const CAT_LABELS = {
-  all:              'Все',
-  currency:         'Currency',
-  runes:            'Runes',
-  lineagesupportgems: 'Lineage Gems',
-  fragments:        'Fragments',
-  essences:         'Essences',
-  ultimatum:        'Soul Cores',
-  breach:           'Breach',
-  delirium:         'Delirium',
-  ritual:           'Omens',
-  abyss:            'Abyss',
-  incursion:        'Incursion',
-  expedition:       'Expedition',
-  vaultkeys:        'Reliquary Keys',
-  uncutgems:        'Uncut Gems',
-  idol:             'Idols',
-  vaal:             'Vaal',
-  verisium:         'Verisium',
+  all:              '🗂️ Все',
+  currency:         '💰 Currency',
+  runes:            '🪬 Runes',
+  lineagesupportgems: '💠 Lineage Gems',
+  fragments:        '🧩 Fragments',
+  essences:         '🧪 Essences',
+  ultimatum:        '🔮 Soul Cores',
+  breach:           '🌀 Breach',
+  delirium:         '🌫️ Delirium',
+  ritual:           '🩸 Omens',
+  abyss:            '🦴 Abyss',
+  incursion:        '🏛️ Incursion',
+  expedition:       '⛏️ Expedition',
+  vaultkeys:        '🗝️ Reliquary Keys',
+  uncutgems:        '💎 Uncut Gems',
+  idol:             '🗿 Idols',
+  vaal:             '🐉 Vaal',
+  verisium:         '🪙 Verisium',
 };
 // Категории уникальных предметов (раздел «Уникалы» и группа в Price Check)
 const UNIQUE_CATS = {
-  weapon:    'Оружие',
-  armour:    'Броня',
-  accessory: 'Аксессуары',
-  jewel:     'Самоцветы',
-  flask:     'Фласки',
-  map:       'Карты',
-  sanctum:   'Sanctum',
+  weapon:    '⚔️ Оружие',
+  armour:    '🛡️ Броня',
+  accessory: '💍 Аксессуары',
+  jewel:     '🔷 Самоцветы',
+  flask:     '⚗️ Фласки',
+  map:       '🗺️ Карты',
+  sanctum:   '🏺 Sanctum',
 };
 
 const budgetEl   = document.getElementById('budget');
@@ -1280,8 +1280,10 @@ function pcEvaluate() {
     </div>
     ${a.reasons.map(r => `<div class="pc-reason">${r}</div>`).join('')}
     <div class="pc-reason" style="color:#aaa;margin-top:4px">Оценка по 7-дневной динамике poe2scout; патчи, анонсы и конец лиги не учитываются.</div>
-    <button class="tr-btn" style="margin-top:8px" onclick="stashAdd()">+ В Stash</button>
+    <div class="pc-reason" style="color:#2e7d32;margin-top:6px;font-weight:600">✓ автоматически добавлено в Stash ниже</div>
+    <button class="tr-btn" style="margin-top:6px" onclick="stashAdd()">↻ Обновить кол-во в Stash</button>
   </div>`;
+  stashAdd(); // авто-добавление в стеш после вставки из буфера
 }
 
 /* Stash */
@@ -1808,7 +1810,7 @@ async function loadAll() {
 
             <p style="margin-top:6px"><b>Как строится рекомендация.</b> Сумма шести сигналов: 7д-тренд (рост +15..50% — за держать; перегрев &gt;+50% и падение &lt;−15% — за продажу), разворот (7д рос, а 3д уже в минусе — сильный сигнал продажи), движение за 24ч (просадка &gt;3% после роста — окно фиксации), позиция в 7-дневном диапазоне (у максимума — выгодно продать, у дна без падения — невыгодно), динамика предложения (объём упал — дефицит держит цену, вырос — давит) и ликвидность (меньше 20 сделок/день — продажа затянется). Каждый сигнал виден в обосновании. Оценка чисто статистическая: патчи, анонсы и конец лиги она не знает.</p>
 
-            <p style="margin-top:10px"><b>📦 Stash.</b> Кнопка «+ В Stash» сохраняет оценённый предмет. Цены и рекомендации пересчитываются живыми при каждом обновлении; Δ — изменение к цене на момент добавления. Повторное добавление того же предмета обновляет количество (база для Δ сохраняется). Клик по названию раскрывает обоснование, наведение — показывает его в подсказке. Сортировка кликом по заголовку: цены и Δ — сначала по убыванию, рекомендация — по срочности продажи. Продал — убери строку ✕.</p>
+            <p style="margin-top:10px"><b>📦 Stash.</b> После вставки предмета из буфера (Ctrl+V) он добавляется в Stash автоматически; кнопка «↻ Обновить кол-во в Stash» обновляет количество для того же предмета. Цены и рекомендации пересчитываются живыми при каждом обновлении; Δ — изменение к цене на момент добавления. Повторное добавление того же предмета обновляет количество (база для Δ сохраняется). Клик по названию раскрывает обоснование, наведение — показывает его в подсказке. Сортировка кликом по заголовку: цены и Δ — сначала по убыванию, рекомендация — по срочности продажи. Продал — убери строку ✕.</p>
 
             <p style="margin-top:10px"><b>Ограничения.</b> История — дневные свечи, внутридневные движения не видны. Биржа берёт комиссию голдом — в расчётах её нет. Цены маленьких предметов в div округляются крупными шагами — для них котируй в ex. Все «ожидаемые прибыли» — оценки по историческим ценам, не гарантия.</p>
           </div></div>
@@ -1817,7 +1819,7 @@ async function loadAll() {
       <div id="tab-price" style="display:${mainTab==='price'?'':'none'}">
         <div class="content">
           <div class="card">
-            <div class="card-header coll" style="background:#e0f2f1;color:#00695c" onclick="toggleSec('pc')">${chev('pc')}🔎 Price Check <span class="badge" style="background:#00897b;color:#fff;margin-left:auto">Ctrl+C</span></div>
+            <div class="card-header coll" style="background:#e0f2f1;color:#00695c" onclick="toggleSec('pc')">${chev('pc')}📋 Оценка из буфера <span class="badge" style="background:#00897b;color:#fff;margin-left:auto">Ctrl+C → авто-Stash</span></div>
             <div id="sec-pc" style="${secStyle('pc')}">
             <div class="pc-form">
               <textarea id="pc-input" onpaste="setTimeout(pcEvaluate, 60)" placeholder="Кликни сюда и нажми Ctrl+V — оценка запустится сама&#10;&#10;Item Class: Stackable Currency&#10;Rarity: Currency&#10;Greater Chaos Orb&#10;--------&#10;Stack Size: 18/20&#10;..."></textarea>
