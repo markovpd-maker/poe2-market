@@ -1,13 +1,14 @@
-<!DOCTYPE html>
-<script type="application/json" id="cowork-artifact-meta">
+<!DOCTYPE html><script type="application/json" id="cowork-artifact-meta">
 {
   "name": "Poe2 Market Runes",
   "schemaVersion": 1,
-  "description": "PoE2 Market Dashboard для лиги Runes of Aldur. Данные из poe2scout: курсы валют в Divine, топ-10 флип, топ-10 долгосрочные вложения, портфель с биржевыми ордерами в exalted, блок Hinekora's Lock с графиком и вердиктом (2 шт.), крафт-арбитраж (Origin Core, Perfect Runes).",
+  "description": "PoE2 Market Dashboard (лига Runes of Aldur), данные poe2scout. Вкладки: Торговая площадка (курсы валют, рекомендованный портфель, журнал сделок, топ-флип/инвест по всем категориям валюты, крафт-арбитраж, раздел уникальных предметов), Price Check (выбор предмета → курс div·ex·c, описание, график истории и аналитика с рекомендацией), Stash (быстрая оценка из буфера Ctrl+C + сохранённые позиции). Аналитика полностью клиентская, без Claude API.",
   "mcpTools": [
-    "mcp__poe2scout-mcp__get_currency_items"
+    "mcp__poe2scout-mcp__get_currency_items",
+    "mcp__poe2scout-mcp__get_unique_items"
   ],
   "mcpServerNames": [
+    "poe2scout-mcp",
     "poe2scout-mcp"
   ]
 }
@@ -17,6 +18,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PoE2 Market — Runes of Aldur</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.0/dist/chart.umd.js" integrity="sha384-iU8HYtnGQ8Cy4zl7gbNMOhsDTTKX02BTXptVP/vqAWIaTfM7isw76iyZCsjL2eVi" crossorigin="anonymous"></script>
 <style>
 :root { color-scheme: light; }
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -204,6 +206,46 @@ th.sort:hover { color: #333; }
 .headroom-ok   { color: #f57c00; font-weight: 700; font-size: 12px; }
 .headroom-low  { color: #bbb; font-size: 12px; }
 .badge-craft { background: #7b1fa2; color: #fff; }
+
+/* Uniques */
+.uniq-block .card-header { background: #fde7f3; color: #880e4f; }
+.cat-tab.active-uniq { background: #ad1457; border-color: #ad1457; color: #fff; font-weight: 600; }
+.uniq-icon { width: 26px; height: 26px; image-rendering: pixelated; flex-shrink: 0; }
+.uniq-name { font-weight: 700; font-size: 12px; color: #880e4f; }
+.uniq-base { font-size: 10px; color: #aaa; }
+.liq-badge { font-size: 10px; padding: 1px 6px; border-radius: 8px; font-weight: 600; white-space: nowrap; }
+.liq-hi { background: #e8f5e9; color: #2e7d32; }
+.liq-md { background: #fff8e1; color: #f57c00; }
+.liq-lo { background: #ffebee; color: #c62828; }
+
+/* Price Check tab (dropdown) */
+.pcx-form { display: flex; gap: 8px; padding: 11px 13px; align-items: center; border-bottom: 1px solid #f0f0f0; background: #fafafa; flex-wrap: wrap; }
+.pcx-form label { font-size: 12px; color: #555; font-weight: 600; }
+.pcx-select { flex: 1; min-width: 240px; max-width: 460px; padding: 6px 9px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px; background: #fff; color: #1a1a2e; outline: none; }
+.pcx-select:focus { border-color: #00897b; }
+.pcx-body { padding: 13px; }
+.pcx-head { display: flex; align-items: center; gap: 11px; flex-wrap: wrap; margin-bottom: 10px; }
+.pcx-head img { width: 40px; height: 40px; image-rendering: pixelated; }
+.pcx-title { font-size: 16px; font-weight: 700; color: #1a1a2e; }
+.pcx-subtitle { font-size: 11px; color: #999; }
+.pcx-prices { display: flex; gap: 10px; flex-wrap: wrap; margin: 6px 0 12px; }
+.pcx-pbox { background: #f5f4f0; border: 1px solid #e0ddd8; border-radius: 8px; padding: 8px 14px; min-width: 92px; }
+.pcx-pbox .lbl { font-size: 10px; color: #888; text-transform: uppercase; letter-spacing: .4px; }
+.pcx-pbox .val { font-size: 17px; font-weight: 700; color: #1a1a2e; }
+.pcx-pbox .unit { font-size: 11px; color: #aaa; font-weight: 400; }
+.pcx-grid { display: grid; grid-template-columns: 1.3fr 1fr; gap: 13px; align-items: start; }
+@media (max-width: 760px) { .pcx-grid { grid-template-columns: 1fr; } }
+.pcx-chart-card, .pcx-info-card { background: #fff; border: 1px solid #e8e6e1; border-radius: 9px; padding: 11px; }
+.pcx-chart-wrap { height: 210px; position: relative; }
+.pcx-section-h { font-size: 11px; font-weight: 700; color: #555; text-transform: uppercase; letter-spacing: .4px; margin-bottom: 7px; }
+.pcx-mods { font-size: 12px; line-height: 1.5; color: #1a1a2e; }
+.pcx-mod-imp { color: #6a5acd; }
+.pcx-mod-exp { color: #1565c0; }
+.pcx-flavor { font-style: italic; color: #999; font-size: 11px; margin-top: 7px; white-space: pre-line; }
+.pcx-prop { font-size: 11px; color: #777; }
+.pcx-stat-grid { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; font-size: 11px; margin-top: 4px; }
+.pcx-stat-grid .k { color: #999; }
+.pcx-stat-grid .v { color: #333; font-weight: 600; }
 </style>
 </head>
 <body>
@@ -245,9 +287,11 @@ const LEAGUE = 'Runes of Aldur';
 let divinePrice = 132.1;
 let chaosPrice  = 12.2;
 let allValidItems = [];
-let marketByText  = {}; // Text -> item (все категории, для автоподстановки и рыночной цены)
+let allUniques    = []; // уникальные предметы всех категорий (отдельный раздел + Price Check)
+let marketByText  = {}; // Text -> item (валюта + уникалы, для автоподстановки, рыночной цены и Price Check)
 let flipCat   = 'all';
 let investCat = 'all';
+let uniqCat   = 'weapon'; // активная вкладка раздела уникалов
 
 const CAT_LABELS = {
   all:              'Все',
@@ -256,11 +300,28 @@ const CAT_LABELS = {
   lineagesupportgems: 'Lineage Gems',
   fragments:        'Fragments',
   essences:         'Essences',
+  ultimatum:        'Soul Cores',
   breach:           'Breach',
   delirium:         'Delirium',
   ritual:           'Omens',
   abyss:            'Abyss',
+  incursion:        'Incursion',
+  expedition:       'Expedition',
+  vaultkeys:        'Reliquary Keys',
+  uncutgems:        'Uncut Gems',
+  idol:             'Idols',
+  vaal:             'Vaal',
   verisium:         'Verisium',
+};
+// Категории уникальных предметов (раздел «Уникалы» и группа в Price Check)
+const UNIQUE_CATS = {
+  weapon:    'Оружие',
+  armour:    'Броня',
+  accessory: 'Аксессуары',
+  jewel:     'Самоцветы',
+  flask:     'Фласки',
+  map:       'Карты',
+  sanctum:   'Sanctum',
 };
 
 const budgetEl   = document.getElementById('budget');
@@ -1080,12 +1141,13 @@ function secStyle(key) { return collapsedSecs.has(key) ? 'display:none' : ''; }
 
 function switchMainTab(t) {
   mainTab = t;
-  ['market', 'price', 'help'].forEach(k => {
+  ['market', 'price', 'pricecheck', 'help'].forEach(k => {
     const el = document.getElementById('tab-' + k);
     if (el) el.style.display = k === t ? '' : 'none';
     document.getElementById('mt-' + k)?.classList.toggle('active', k === t);
   });
   if (t === 'price') renderStash();
+  if (t === 'pricecheck') fillPcxList(pcxCurrent ? pcxCurrent.Text : '');
 }
 
 // Парсер игрового Ctrl+C: имя = последняя строка первого блока без Item Class/Rarity,
@@ -1334,6 +1396,222 @@ function renderStash() {
     </div>`;
 }
 
+/* ── Uniques: раздел и таблица ──
+   Цена уникалов в exalted, как у валюты. Ликвидность критична: у многих
+   junk-уникалов 1–3 листинга и тролльные цены, поэтому показываем объём явно. */
+function uniqLiquidity(it) {
+  const aq = avgQty(it.PriceLogs, 7) || it.CurrentQuantity || 0;
+  if (aq >= 20) return { aq, label: `${aq.toFixed(0)}/д`, cls: 'liq-hi' };
+  if (aq >= 5)  return { aq, label: `${aq.toFixed(0)}/д`, cls: 'liq-md' };
+  return { aq, label: `${aq.toFixed(0)}/д`, cls: 'liq-lo' };
+}
+
+function setUniqCat(cat) { uniqCat = cat; renderUniques(); }
+
+function uniqTabsHtml() {
+  return Object.keys(UNIQUE_CATS).map(c => {
+    const active = c === uniqCat ? 'active-uniq' : '';
+    const n = allUniques.filter(u => u.CategoryApiId === c).length;
+    return `<button class="cat-tab ${active}" onclick="setUniqCat('${c}')">${UNIQUE_CATS[c]}${n?` <span style="opacity:.6">${n}</span>`:''}</button>`;
+  }).join('');
+}
+
+function renderUniqTable() {
+  const items = allUniques
+    .filter(u => u.CategoryApiId === uniqCat && u.CurrentPrice > 0)
+    .sort((a,b) => b.CurrentPrice - a.CurrentPrice)
+    .slice(0, 20);
+  if (!items.length) return '<div class="no-data">Нет данных по уникалам в этой категории</div>';
+  const hdr = `<tr><th>#</th><th>Предмет</th><th>Цена (div)</th><th>ex · c</th><th>Ликвидность</th><th>7д тренд</th><th></th></tr>`;
+  const rows = items.map((it, i) => {
+    const liq = uniqLiquidity(it);
+    const t7 = trendPct(it.PriceLogs, 7);
+    const base = it.ItemMetadata?.base_type || it.Type || '';
+    const nm = (it.Name || it.Text || '').replace(/'/g, "\\'");
+    return `<tr>
+      <td><span class="rank ${i<3?'top3':''}">${i+1}</span></td>
+      <td><div style="display:flex;align-items:center;gap:7px">
+        <img class="uniq-icon" src="${it.IconUrl}" onerror="this.style.display='none'">
+        <div><div class="uniq-name">${it.Name || it.Text}</div><div class="uniq-base">${base}</div></div>
+      </div></td>
+      <td><div class="price-now">${toDiv(it.CurrentPrice).toFixed(toDiv(it.CurrentPrice)<10?2:0)} div</div></td>
+      <td><div class="bid-sub" style="color:#888">${it.CurrentPrice.toFixed(0)} ex · ${toC(it.CurrentPrice).toFixed(0)} c</div></td>
+      <td><span class="liq-badge ${liq.cls}">${liq.label}</span></td>
+      <td>${trendEl(t7)}</td>
+      <td><button class="cur-btn" style="font-size:10px" onclick="pcxOpen('${(it.Text||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}')">📊 разбор</button></td>
+    </tr>`;
+  }).join('');
+  return `<div style="overflow-x:auto"><table><thead>${hdr}</thead><tbody>${rows}</tbody></table></div>`;
+}
+
+function renderUniques() {
+  const tabs = document.getElementById('uniq-tabs');
+  const body = document.getElementById('uniq-content');
+  if (tabs) tabs.innerHTML = uniqTabsHtml();
+  if (body) body.innerHTML = renderUniqTable();
+}
+
+/* ── Price Check (выпадающий список): курс, описание, график, аналитика ── */
+let pcxChart = null;
+let pcxCurrent = null;
+
+// Datalist со ВСЕМИ предметами (валюта + расходники + уникалы).
+// <datalist> в Chromium фильтрует опции по любой части строки — поиск по подстроке.
+// Различаем уникал/валюту по категории (у валюты тоже есть ItemMetadata, поэтому по нему нельзя).
+function isUniqueItem(it) { return !!UNIQUE_CATS[it.CategoryApiId]; }
+
+function fillPcxList(preselectText) {
+  const dl = document.getElementById('pcx-dl');
+  if (!dl) return;
+  const esc = s => (s||'').replace(/"/g,'&quot;');
+  const items = Object.values(marketByText).filter(it => it && it.Text);
+  items.sort((a,b) => (b.CurrentPrice||0) - (a.CurrentPrice||0)); // дорогие сверху
+  dl.innerHTML = items.map(it => {
+    const isU = isUniqueItem(it);
+    const cat = isU ? UNIQUE_CATS[it.CategoryApiId] : (CAT_LABELS[it.CategoryApiId] || it.CategoryApiId);
+    const pd = it.CurrentPrice > 0 ? toDiv(it.CurrentPrice).toFixed(toDiv(it.CurrentPrice) < 10 ? 2 : 1) + ' div' : '—';
+    const nm = isU ? (it.Name || it.Text) : it.Text;
+    return `<option value="${esc(it.Text)}" label="${esc(nm)} — ${pd} · ${cat}"></option>`;
+  }).join('');
+  const inp = document.getElementById('pcx-input');
+  if (inp && preselectText) inp.value = preselectText;
+}
+
+// Ввод в поле: рендерим разбор только при точном совпадении (после выбора из подсказок)
+function pcxInput() {
+  const v = (document.getElementById('pcx-input')?.value || '').trim();
+  if (!v) { pcxSelect(''); return; }
+  if (marketByText[v]) pcxSelect(v);
+}
+
+function pcxSelect(text) {
+  const res = document.getElementById('pcx-result');
+  if (!text) { if (res) res.innerHTML = '<div class="no-data">Выбери предмет из списка — покажу курс, историю и аналитику</div>'; return; }
+  const it = marketByText[text];
+  if (!it) { if (res) res.innerHTML = '<div class="no-data">Предмет не найден в данных poe2scout</div>'; return; }
+  renderPcx(it);
+}
+
+// Открыть Price Check на конкретном предмете (кнопка «разбор» из уникалов)
+function pcxOpen(text) {
+  switchMainTab('pricecheck');
+  fillPcxList(text);
+  const inp = document.getElementById('pcx-input');
+  if (inp) inp.value = text;
+  pcxSelect(text);
+  document.getElementById('tab-pricecheck')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function pcxDescribe(it) {
+  const m = it.ItemMetadata || {};
+  if (!isUniqueItem(it)) {
+    // валюта / расходник: у ItemMetadata есть description / effect / стак
+    const eff = (m.effect || []).map(x => `<div class="pcx-mod-exp">${x}</div>`).join('');
+    const desc = m.description ? `<div class="pcx-prop" style="margin-top:5px;color:#555">${m.description}</div>` : '';
+    const stack = m.max_stack_size ? `<div class="pcx-prop">Макс. размер стака: <b>${m.max_stack_size}</b></div>` : '';
+    return `<div class="pcx-info-card">
+      <div class="pcx-section-h">Описание</div>
+      <div class="pcx-prop">Категория: <b>${CAT_LABELS[it.CategoryApiId]||it.CategoryApiId}</b> · стакающийся расходник (Currency Exchange)</div>
+      ${eff}${stack}${desc}
+    </div>`;
+  }
+  const props = m.properties ? Object.entries(m.properties)
+    .map(([k,v]) => v===null ? `<div class="pcx-prop" style="font-weight:700;color:#555">${k}</div>` : `<div class="k">${k}</div><div class="v">${v}</div>`) : [];
+  const propGrid = props.length ? `<div class="pcx-stat-grid">${props.join('')}</div>` : '';
+  const imp = (m.implicit_mods||[]).map(x => `<div class="pcx-mod-imp">${x}</div>`).join('');
+  const exp = (m.explicit_mods||[]).map(x => `<div class="pcx-mod-exp">${x}</div>`).join('');
+  const req = m.requirements && Object.keys(m.requirements).length
+    ? `<div class="pcx-prop" style="margin-top:6px">Требования: ${Object.entries(m.requirements).map(([k,v])=>`${k} ${v}`).join(', ')}</div>` : '';
+  const flavor = m.flavor_text ? `<div class="pcx-flavor">${m.flavor_text}</div>` : '';
+  return `<div class="pcx-info-card">
+    <div class="pcx-section-h">${m.base_type||it.Type||'Уникальный предмет'}${m.item_level?` · iLvl ${m.item_level}`:''}</div>
+    ${propGrid}
+    <div class="pcx-mods" style="margin-top:8px">${imp}${imp&&exp?'<div style="height:5px"></div>':''}${exp}</div>
+    ${req}${flavor}
+  </div>`;
+}
+
+function renderPcx(it) {
+  const res = document.getElementById('pcx-result');
+  if (!res) return;
+  pcxCurrent = it;
+  const a = adviseItem(it);
+  const ex = it.CurrentPrice;
+  const isUniq = isUniqueItem(it);
+  const liq = isUniq ? uniqLiquidity(it) : null;
+  const liqLine = isUniq
+    ? `<span class="liq-badge ${liq.cls}" title="средний объём листингов">ликвидность ${liq.label}</span>`
+    : '';
+  res.innerHTML = `<div class="pcx-body">
+    <div class="pcx-head">
+      <img src="${it.IconUrl}" onerror="this.style.display='none'">
+      <div style="flex:1;min-width:0">
+        <div class="pcx-title">${it.Name || it.Text}</div>
+        <div class="pcx-subtitle">${isUniq ? (it.Text||'') + ' · ⭐ ' + (UNIQUE_CATS[it.CategoryApiId]||it.CategoryApiId) : (CAT_LABELS[it.CategoryApiId]||it.CategoryApiId)} ${liqLine}</div>
+      </div>
+      <div class="verdict-badge ${a.cls}">${a.verdict}</div>
+    </div>
+    <div class="pcx-prices">
+      <div class="pcx-pbox"><div class="lbl">Divine</div><div class="val">${toDiv(ex).toFixed(toDiv(ex)<10?3:2)} <span class="unit">div</span></div></div>
+      <div class="pcx-pbox"><div class="lbl">Exalted</div><div class="val">${ex.toFixed(ex<10?2:0)} <span class="unit">ex</span></div></div>
+      <div class="pcx-pbox"><div class="lbl">Chaos</div><div class="val">${toC(ex).toFixed(toC(ex)<10?2:0)} <span class="unit">c</span></div></div>
+    </div>
+    <div class="pcx-grid">
+      <div class="pcx-chart-card">
+        <div class="pcx-section-h">История цены (div) · poe2scout</div>
+        <div class="pcx-chart-wrap"><canvas id="pcx-canvas"></canvas></div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:13px">
+        <div class="pcx-info-card">
+          <div class="pcx-section-h">Аналитика и рекомендация</div>
+          ${a.reasons.map(r => `<div class="pc-reason">${r}</div>`).join('') || '<div class="pc-reason" style="color:#aaa">Недостаточно истории для сигналов.</div>'}
+          <div class="pc-reason" style="color:#aaa;margin-top:5px">Оценка по 7-дневной динамике poe2scout; патчи, анонсы и конец лиги не учитываются.</div>
+        </div>
+        ${pcxDescribe(it)}
+      </div>
+    </div>
+  </div>`;
+  drawPcxChart(it);
+}
+
+function drawPcxChart(it) {
+  const canvas = document.getElementById('pcx-canvas');
+  if (!canvas) return;
+  if (pcxChart) { try { pcxChart.destroy(); } catch(e){} pcxChart = null; }
+  // PriceLogs новые→старые, могут быть null; разворачиваем в хронологию и переводим в div
+  const logs = (it.PriceLogs || []).filter(l => l && typeof l.Price === 'number' && l.Price > 0).slice().reverse();
+  const labels = logs.map(l => { const d = new Date(l.Time); return isNaN(d) ? '' : (d.getDate()+'.'+(d.getMonth()+1)); });
+  const data = logs.map(l => +(l.Price / divinePrice).toFixed(3));
+  if (!data.length) { canvas.parentElement.innerHTML = '<div class="no-data">Нет истории цены</div>'; return; }
+  if (!window.Chart) {
+    // fallback: простой SVG-спарклайн, если CDN Chart.js недоступен
+    const w = 320, h = 200, pad = 6;
+    const mn = Math.min(...data), mx = Math.max(...data), rng = mx - mn || 1;
+    const pts = data.map((v,i) => `${pad + i*(w-2*pad)/(Math.max(1,data.length-1))},${h-pad-(v-mn)/rng*(h-2*pad)}`).join(' ');
+    canvas.parentElement.innerHTML = `<svg viewBox="0 0 ${w} ${h}" style="width:100%;height:100%"><polyline points="${pts}" fill="none" stroke="#ad1457" stroke-width="2"/></svg>
+      <div class="pcx-prop" style="text-align:center">${mn.toFixed(2)}–${mx.toFixed(2)} div</div>`;
+    return;
+  }
+  pcxChart = new Chart(canvas, {
+    type: 'line',
+    data: { labels, datasets: [{
+      label: 'div', data,
+      borderColor: '#ad1457', backgroundColor: 'rgba(173,20,87,.10)',
+      borderWidth: 2, fill: true, tension: .25,
+      pointRadius: 2, pointHoverRadius: 5, pointBackgroundColor: '#ad1457',
+    }]},
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false },
+        tooltip: { callbacks: { label: c => `${c.parsed.y} div · ${(c.parsed.y*divinePrice).toFixed(0)} ex` } } },
+      scales: {
+        y: { ticks: { font: { size: 10 }, callback: v => v + ' div' }, grid: { color: '#f0f0f0' } },
+        x: { ticks: { font: { size: 10 }, maxRotation: 0, autoSkip: true }, grid: { display: false } },
+      },
+    },
+  });
+}
+
 /* ── Data layer ──
    В Cowork данные идут через MCP (window.cowork). Standalone (GitHub Pages и т.п.) —
    напрямую из публичного API poe2scout: /api/poe2/Leagues/{league}/Currencies/ByCategory.
@@ -1350,6 +1628,21 @@ async function fetchCategory(cat) {
     } catch { return []; }
   }
   const url = `${API_BASE}/Currencies/ByCategory?Category=${encodeURIComponent(cat)}&Page=1&PerPage=250`;
+  const d = await fetchJsonCors(url);
+  return Array.isArray(d?.Items) ? d.Items : [];
+}
+
+// Уникальные предметы по категории (формат Items идентичен валюте + ItemMetadata)
+async function fetchUniqueCategory(cat) {
+  if (window.cowork?.callMcpTool) {
+    try {
+      const r = await window.cowork.callMcpTool('mcp__poe2scout-mcp__get_unique_items', { category: cat, league: LEAGUE, limit: 100 });
+      if (!r || r.isError) return [];
+      const d = r.structuredContent ?? (r.content?.[0] ? JSON.parse(r.content[0].text) : []);
+      return Array.isArray(d) ? d : [];
+    } catch { return []; }
+  }
+  const url = `${API_BASE}/Uniques/ByCategory?Category=${encodeURIComponent(cat)}&Page=1&PerPage=100`;
   const d = await fetchJsonCors(url);
   return Array.isArray(d?.Items) ? d.Items : [];
 }
@@ -1416,11 +1709,25 @@ async function loadAll() {
   if (crReset) crReset.textContent = '...';
 
   try {
-    const cats = ['currency','fragments','runes','essences','breach','delirium','lineagesupportgems','incursion','ritual','abyss','verisium'];
-    const results = await Promise.all(cats.map(cat => fetchCategory(cat)));
+    const cats = ['currency','fragments','runes','essences','ultimatum','breach','delirium','lineagesupportgems','incursion','ritual','abyss','expedition','vaultkeys','uncutgems','idol','vaal','verisium'];
+    const uniqCats = Object.keys(UNIQUE_CATS);
+    const [results, uniqResults] = await Promise.all([
+      Promise.all(cats.map(cat => fetchCategory(cat))),
+      Promise.all(uniqCats.map(cat => fetchUniqueCategory(cat))),
+    ]);
 
     const byCategory = {};
     cats.forEach((cat, i) => { byCategory[cat] = results[i]; });
+
+    // уникалы: тег категории + единый массив
+    allUniques = [];
+    uniqCats.forEach((cat, i) => {
+      (uniqResults[i] || []).forEach(u => {
+        if (!u || !(u.CurrentPrice > 0)) return;
+        u.CategoryApiId = u.CategoryApiId || cat;
+        allUniques.push(u);
+      });
+    });
 
     const currency    = byCategory['currency'];
     const allCurrency = cats.flatMap(c => byCategory[c]);
@@ -1441,9 +1748,11 @@ async function loadAll() {
     const crEl = document.getElementById('chaos-rate');
     if (crEl) crEl.textContent = chaosPrice.toFixed(1);
 
-    // каталог всех предметов для автоподстановки и рыночных цен трекера
+    // каталог всех предметов для автоподстановки, рыночных цен трекера и Price Check
     marketByText = {};
     allCurrency.forEach(it => { if (it.Text) marketByText[it.Text] = it; });
+    // уникалы тоже в каталог (Price Check, журнал, стеш) — валюта приоритетнее при коллизии имён
+    allUniques.forEach(it => { if (it.Text && !marketByText[it.Text]) marketByText[it.Text] = it; });
 
     const excludeIds = new Set(['divine','mirror','exalted']);
     const minEx = divinePrice; // порог 1 div
@@ -1467,8 +1776,9 @@ async function loadAll() {
 
     document.getElementById('root').innerHTML = `
       <div class="main-tabs">
-        <button class="main-tab ${mainTab==='market'?'active':''}" id="mt-market" onclick="switchMainTab('market')">📈 Рынок</button>
-        <button class="main-tab ${mainTab==='price'?'active':''}" id="mt-price" onclick="switchMainTab('price')">🔎 Price Check</button>
+        <button class="main-tab ${mainTab==='market'?'active':''}" id="mt-market" onclick="switchMainTab('market')">📈 Торговая площадка</button>
+        <button class="main-tab ${mainTab==='pricecheck'?'active':''}" id="mt-pricecheck" onclick="switchMainTab('pricecheck')">🔎 Price Check</button>
+        <button class="main-tab ${mainTab==='price'?'active':''}" id="mt-price" onclick="switchMainTab('price')">📦 Stash</button>
         <button class="main-tab ${mainTab==='help'?'active':''}" id="mt-help" onclick="switchMainTab('help')">📖 Инструкция</button>
       </div>
       <div id="tab-help" style="display:${mainTab==='help'?'':'none'}">
@@ -1490,7 +1800,11 @@ async function loadAll() {
 
             <p style="margin-top:10px"><b>📒 Журнал сделок.</b> Ручной лог покупок/продаж с автоподстановкой названия. Цена за штуку в любой валюте — курс фиксируется в момент записи. P&L: реализованный считается от средней цены закупки, нереализованный — по живой рыночной цене открытого остатка. ⚠ у строки — продано больше, чем куплено (часть выручки без базы).</p>
 
-            <p style="margin-top:10px"><b>🔎 Price Check.</b> Наведи курсор на предмет в игре, нажми Ctrl+C, потом кликни в поле и нажми Ctrl+V — оценка запустится сама (кнопка «Из буфера» работает, если браузер разрешает чтение буфера). Распознаются название и Stack Size. Ответ: цена за штуку и за стак в ex/div/chaos и вердикт от «продавать сейчас» до «держать».</p>
+            <p style="margin-top:10px"><b>🔎 Price Check (вкладка).</b> Начни вводить любую часть названия — поле ищет по подстроке среди <b>всех</b> предметов: валюта, расходники и уникалы. Выбери из подсказок — покажет курс сразу в div · ex · c, описание (для уникалов — база, iLvl, моды, флейвор; для валюты — эффект и стак), график истории цены и аналитику с рекомендацией и обоснованием. Аналитика — та же формула, что в Stash, работает автономно без внешнего AI. Кнопка «📊 разбор» в разделе уникалов открывает этот же экран на нужном предмете.</p>
+
+            <p style="margin-top:10px"><b>⭐ Уникальные предметы.</b> Топ-20 по цене в каждой категории (оружие, броня, аксессуары, самоцветы, фласки, карты, Sanctum). Цена в exalted/divine. Бейдж ликвидности (/д) важен: у дешёвых junk-уникалов часто 1–3 листинга с тролльной ценой — такой цене верить нельзя. Зелёный = ликвидно, красный = единичные листинги.</p>
+
+            <p style="margin-top:10px"><b>📦 Stash (вкладка, бывш. Price Check).</b> Быстрая оценка из игры: наведи курсор на предмет, нажми Ctrl+C, кликни в поле и Ctrl+V — оценка запустится сама (кнопка «Из буфера» работает, если браузер разрешает чтение буфера). Распознаются название и Stack Size. Ответ: цена за штуку и за стак в ex/div/chaos и вердикт от «продавать сейчас» до «держать». Здесь же список сохранённых позиций.</p>
 
             <p style="margin-top:6px"><b>Как строится рекомендация.</b> Сумма шести сигналов: 7д-тренд (рост +15..50% — за держать; перегрев &gt;+50% и падение &lt;−15% — за продажу), разворот (7д рос, а 3д уже в минусе — сильный сигнал продажи), движение за 24ч (просадка &gt;3% после роста — окно фиксации), позиция в 7-дневном диапазоне (у максимума — выгодно продать, у дна без падения — невыгодно), динамика предложения (объём упал — дефицит держит цену, вырос — давит) и ликвидность (меньше 20 сделок/день — продажа затянется). Каждый сигнал виден в обосновании. Оценка чисто статистическая: патчи, анонсы и конец лиги она не знает.</p>
 
@@ -1509,7 +1823,6 @@ async function loadAll() {
               <textarea id="pc-input" onpaste="setTimeout(pcEvaluate, 60)" placeholder="Кликни сюда и нажми Ctrl+V — оценка запустится сама&#10;&#10;Item Class: Stackable Currency&#10;Rarity: Currency&#10;Greater Chaos Orb&#10;--------&#10;Stack Size: 18/20&#10;..."></textarea>
               <div style="display:flex;flex-direction:column;gap:6px">
                 <button class="tr-btn" style="background:#00897b" onclick="pcPaste()">📋 Из буфера</button>
-                <button class="tr-btn" onclick="pcEvaluate()">Оценить</button>
               </div>
             </div>
             <div id="pc-result"></div>
@@ -1518,6 +1831,20 @@ async function loadAll() {
           <div class="card">
             <div class="card-header coll" style="background:#fff3e0;color:#e65100" onclick="toggleSec('stash')">${chev('stash')}📦 Stash <span class="badge" style="background:#ff9800;color:#fff;margin-left:auto" id="stash-count"></span></div>
             <div id="sec-stash" style="${secStyle('stash')}"><div id="pc-stash"></div></div>
+          </div>
+        </div>
+      </div>
+      <div id="tab-pricecheck" style="display:${mainTab==='pricecheck'?'':'none'}">
+        <div class="content">
+          <div class="card">
+            <div class="card-header" style="background:#fce4ec;color:#880e4f">🔎 Price Check <span class="badge" style="background:#ad1457;color:#fff;margin-left:auto">курс · история · аналитика</span></div>
+            <div class="pcx-form">
+              <label>Предмет:</label>
+              <input id="pcx-input" list="pcx-dl" class="pcx-select" autocomplete="off" placeholder="начни вводить любую часть названия — валюта, расходники, уникалы…" oninput="pcxInput()" onchange="pcxInput()">
+              <datalist id="pcx-dl"></datalist>
+              <button class="cur-btn" onclick="var i=document.getElementById('pcx-input');i.value='';i.focus();pcxSelect('')">сброс</button>
+            </div>
+            <div id="pcx-result"><div class="no-data">Выбери предмет из списка — покажу курс в div · ex · c, историю цены и аналитику с рекомендацией</div></div>
           </div>
         </div>
       </div>
@@ -1553,6 +1880,14 @@ async function loadAll() {
           </div>
         </div>
         ${renderCraftBlock(runesItems, fragmentsItems, incursionItems)}
+        <div class="card uniq-block">
+          <div class="card-header coll" onclick="toggleSec('uniq')">${chev('uniq')}⭐ Уникальные предметы <span class="badge" style="background:#ad1457;color:#fff;margin-left:auto">${allUniques.length}</span></div>
+          <div id="sec-uniq" style="${secStyle('uniq')}">
+            <div class="craft-note">Топ-20 по цене в категории. Цена в exalted, как у валюты; маленькая ликвидность = ненадёжная цена (часто 1–3 тролльных листинга). «📊 разбор» открывает Price Check.</div>
+            <div class="cat-tabs" id="uniq-tabs">${uniqTabsHtml()}</div>
+            <div id="uniq-content"></div>
+          </div>
+        </div>
       </div>
       </div>`;
 
@@ -1560,6 +1895,8 @@ async function loadAll() {
     renderPortfolio();
     renderTracker();
     renderStash();
+    renderUniques();
+    fillPcxList(pcxCurrent ? pcxCurrent.Text : '');
 
   } catch(e) {
     document.getElementById('root').innerHTML = `<div class="error-msg">Ошибка: ${e.message}</div>`;
