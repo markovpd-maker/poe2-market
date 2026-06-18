@@ -283,7 +283,7 @@ th.sort:hover { color: #333; }
       <span class="budget-unit" id="u-mid">c</span>
     </div>
     <span class="divine-rate-label" id="rate-label">…</span>
-    <button class="btn-refresh" onclick="loadAll()">↺ Обновить</button>
+    <button class="btn-refresh" onclick="loadAll(true)" title="Тянет свежие данные с poe2scout и сохраняет общий снапшот data.json для всех">↺ Обновить</button>
   </div>
 </div>
 
@@ -305,6 +305,10 @@ let U_BASE  = REALMS[REALM].baseSh;   // подпись базовой един�
 let U_MID   = REALMS[REALM].midSh;    // подпись второй единицы
 let MID_API = REALMS[REALM].midApi;
 let leaguesCache = {};
+// Общий снапшот данных (data.json в репо): на статике читаем его при открытии,
+// а кнопка «Обновить» тянет свежие данные и перезаливает снапшот для всех.
+let SNAPSHOT = null;
+const STANDALONE = !(window.cowork && window.cowork.callMcpTool);
 let divinePrice = 132.1;   // base-валюта за 1 Divine Orb
 let chaosPrice  = 12.2;    // base-валюта за 1 MID-валюту (имя историческое: toC/fmtC работают через неё)
 let allValidItems = [];
@@ -370,8 +374,22 @@ if (!localStorage.getItem('poe2_profiles')) {
   if (oldT && !localStorage.getItem('poe2_trades__основной')) localStorage.setItem('poe2_trades__основной', oldT);
   if (oldS && !localStorage.getItem('poe2_stash__основной'))  localStorage.setItem('poe2_stash__основной',  oldS);
 }
-function tradesKey() { return 'poe2_trades__' + activeProfile; }
-function stashKey()  { return 'poe2_stash__'  + activeProfile; }
+// Стеш и журнал уникальны на (realm, league, profile): своя комбинация — свой набор.
+function scopeKey(prefix) { return prefix + '__' + REALM + '__' + LEAGUE + '__' + activeProfile; }
+function tradesKey() { return scopeKey('poe2_trades'); }
+function stashKey()  { return scopeKey('poe2_stash');  }
+// Один раз переносим старые per-profile ключи в poe2 / Runes of Aldur (где данные и жили).
+(function migrateScoped() {
+  if (localStorage.getItem('poe2_scoped_migrated')) return;
+  getProfiles().forEach(p => {
+    ['poe2_trades','poe2_stash'].forEach(pref => {
+      const oldK = pref + '__' + p, newK = pref + '__poe2__Runes of Aldur__' + p;
+      const v = localStorage.getItem(oldK);
+      if (v && !localStorage.getItem(newK)) localStorage.setItem(newK, v);
+    });
+  });
+  localStorage.setItem('poe2_scoped_migrated', '1');
+})();
 
 function refreshProfileSel() {
   const sel = document.getElementById('profile-sel');
@@ -1724,6 +1742,58 @@ async function fetchJsonCors(url) {
   return null;
 }
 
+/* ── Общий снапшот data.json ──
+   На статике (GitHub Pages) открытие сайта читает data.json — общий для всех.
+   Кнопка «Обновить» тянет свежие данные с poe2scout и перезаливает data.json в репо по токену,
+   так что обновление происходит один раз и видно всем. В Cowork снапшота нет — всегда живой запрос. */
+async function loadSnapshotFile() {
+  if (!STANDALONE) return null;
+  try {
+    const r = await fetchWithTimeout('./data.json?t=' + Date.now(), 8000);
+    if (r.ok) return await r.json();
+  } catch {}
+  return null;
+}
+function ghOwnerRepo() {
+  const m = location.hostname.match(/^([^.]+)\.github\.io$/);
+  return m ? { owner: m[1], repo: 'poe2-market' } : null;
+}
+// b64 unicode-safe
+function b64enc(s) { return btoa(unescape(encodeURIComponent(s))); }
+function b64dec(s) { try { return decodeURIComponent(escape(atob((s||'').replace(/\n/g,'')))); } catch { return ''; } }
+
+async function commitSnapshot() {
+  const gr = ghOwnerRepo();
+  if (!gr) return { ok:false, msg:'не GitHub Pages — снапшот только в этой вкладке' };
+  let token = sessionStorage.getItem('poe2_gh_token');
+  if (!token) {
+    const t = prompt('GitHub token (classic, scope repo) — сохранить общий снапшот data.json для всех. Спросим один раз за сессию:');
+    if (!t) return { ok:false, msg:'без токена снапшот не сохранён' };
+    token = t.trim(); sessionStorage.setItem('poe2_gh_token', token);
+  }
+  const url = `https://api.github.com/repos/${gr.owner}/${gr.repo}/contents/data.json`;
+  const headers = { 'Authorization':'Bearer '+token, 'Accept':'application/vnd.github+json', 'X-GitHub-Api-Version':'2022-11-28' };
+  let sha = null, remote = { snapshots:{} };
+  try {
+    const g = await fetch(url, { headers });
+    if (g.ok) { const j = await g.json(); sha = j.sha; const dec = b64dec(j.content); if (dec) { const p = JSON.parse(dec); if (p && p.snapshots) remote = p; } }
+    else if (g.status === 401 || g.status === 403) { sessionStorage.removeItem('poe2_gh_token'); return { ok:false, msg:'токен отклонён (нужен scope repo)' }; }
+  } catch {}
+  // не затираем чужие лиги: обновляем только текущий ключ
+  const key = REALM + '|' + LEAGUE;
+  remote.snapshots = remote.snapshots || {};
+  remote.snapshots[key] = SNAPSHOT.snapshots[key];
+  SNAPSHOT = remote;
+  const body = { message: 'update market snapshot ' + key, content: b64enc(JSON.stringify(SNAPSHOT)) };
+  if (sha) body.sha = sha;
+  try {
+    const r = await fetch(url, { method:'PUT', headers, body: JSON.stringify(body) });
+    if (r.ok) return { ok:true };
+    if (r.status === 401 || r.status === 403) { sessionStorage.removeItem('poe2_gh_token'); return { ok:false, msg:'токен отклонён' }; }
+    return { ok:false, msg:'GitHub ' + r.status };
+  } catch (e) { return { ok:false, msg:e.message }; }
+}
+
 /* ── JS-пароль для standalone-версии (в Cowork не запрашивается).
    Это лишь лёгкий заслон от случайных глаз: проверка на клиенте, обходится через devtools. */
 (function pwGate() {
@@ -1780,8 +1850,9 @@ function onLeagueChange(v) {
 }
 
 /* ── Main (v3) ── */
-async function loadAll() {
-  document.getElementById('root').innerHTML = `<div class="loading"><div class="spinner"></div><br>Загружаем данные с poe2scout…</div>`;
+async function loadAll(force) {
+  force = force === true;   // true = нажата кнопка «Обновить»: живой запрос + перезалить снапшот
+  document.getElementById('root').innerHTML = `<div class="loading"><div class="spinner"></div><br>${force ? 'Обновляем данные с poe2scout…' : 'Загружаем данные…'}</div>`;
   document.getElementById('updated').textContent = 'Загружается...';
   const rlReset = document.getElementById('rate-label'); if (rlReset) rlReset.textContent = '…';
 
@@ -1793,28 +1864,47 @@ async function loadAll() {
       if (cur) { LEAGUE = cur.Value; localStorage.setItem('poe2_league_' + REALM, LEAGUE); }
     }
     fillGameLeagueSel(leagues);
-    // категории реалма (валюта + уникалы) — динамически
-    buildCategories(await fetchCategoriesResp());
 
-    const cats = CURRENCY_CATS.length ? CURRENCY_CATS : ['currency'];
-    const uniqCats = Object.keys(UNIQUE_CATS);
-    const [results, uniqResults] = await Promise.all([
-      Promise.all(cats.map(cat => fetchCategory(cat))),
-      Promise.all(uniqCats.map(cat => fetchUniqueCategory(cat))),
-    ]);
-
-    const byCategory = {};
-    cats.forEach((cat, i) => { byCategory[cat] = results[i]; });
-
-    // уникалы: тег категории + единый массив
-    allUniques = [];
-    uniqCats.forEach((cat, i) => {
-      (uniqResults[i] || []).forEach(u => {
-        if (!u || !(u.CurrentPrice > 0)) return;
-        u.CategoryApiId = u.CategoryApiId || cat;
-        allUniques.push(u);
+    // Источник данных: общий снапшот (data.json) при обычном открытии, либо живой запрос.
+    let cats, uniqCats, byCategory, savedAt, fromSnap = false, commitRes = null;
+    if (!force) {
+      if (!SNAPSHOT) SNAPSHOT = await loadSnapshotFile();
+      const snap = SNAPSHOT && SNAPSHOT.snapshots && SNAPSHOT.snapshots[REALM + '|' + LEAGUE];
+      if (snap && snap.byCategory) {
+        buildCategories(snap.categoriesResp || {});
+        cats = snap.cats || Object.keys(snap.byCategory);
+        uniqCats = snap.uniqCats || Object.keys(UNIQUE_CATS);
+        byCategory = snap.byCategory;
+        allUniques = snap.uniques || [];
+        savedAt = snap.savedAt;
+        fromSnap = true;
+      }
+    }
+    if (!fromSnap) {
+      const catsResp = await fetchCategoriesResp();
+      buildCategories(catsResp);
+      cats = CURRENCY_CATS.length ? CURRENCY_CATS : ['currency'];
+      uniqCats = Object.keys(UNIQUE_CATS);
+      const [results, uniqResults] = await Promise.all([
+        Promise.all(cats.map(cat => fetchCategory(cat))),
+        Promise.all(uniqCats.map(cat => fetchUniqueCategory(cat))),
+      ]);
+      byCategory = {};
+      cats.forEach((cat, i) => { byCategory[cat] = results[i]; });
+      allUniques = [];
+      uniqCats.forEach((cat, i) => {
+        (uniqResults[i] || []).forEach(u => {
+          if (!u || !(u.CurrentPrice > 0)) return;
+          u.CategoryApiId = u.CategoryApiId || cat;
+          allUniques.push(u);
+        });
       });
-    });
+      savedAt = new Date().toISOString();
+      if (!SNAPSHOT) SNAPSHOT = { snapshots: {} };
+      if (!SNAPSHOT.snapshots) SNAPSHOT.snapshots = {};
+      SNAPSHOT.snapshots[REALM + '|' + LEAGUE] = { savedAt, cats, uniqCats, byCategory, uniques: allUniques, categoriesResp: catsResp };
+      if (force) commitRes = await commitSnapshot();
+    }
 
     const currency    = byCategory['currency'];
     const allCurrency = cats.flatMap(c => byCategory[c]);
@@ -1859,8 +1949,12 @@ async function loadAll() {
         _inv:  calcInvestScore(it.PriceLogs),
       }));
 
-    const now = new Date().toLocaleTimeString('ru', { hour:'2-digit', minute:'2-digit' });
-    document.getElementById('updated').textContent = `Обновлено в ${now} · poe2scout.com · ${REALMS[REALM].game} · ${LEAGUE}`;
+    const savedStr = savedAt ? new Date(savedAt).toLocaleString('ru', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) : '—';
+    const srcTxt = fromSnap ? '🌍 общий снапшот'
+      : force ? (commitRes && commitRes.ok ? '✅ обновлено, снапшот сохранён для всех'
+                : commitRes ? '⚠ обновлено (снапшот не сохранён: ' + commitRes.msg + ')' : '✅ обновлено')
+      : '⚡ живой запрос (снапшота нет)';
+    document.getElementById('updated').textContent = `${REALMS[REALM].game} · ${LEAGUE} · данные ${savedStr} · ${srcTxt}`;
 
     const runesItems     = byCategory['runes']     || [];
     const fragmentsItems = byCategory['fragments'] || [];
@@ -1878,7 +1972,11 @@ async function loadAll() {
           <div class="card"><div class="card-header" style="background:#e8eaf6;color:#283593">📖 Как пользоваться дашбордом</div>
           <div style="padding:14px 16px;font-size:13px;line-height:1.55;color:#333">
 
-            <p><b>Источник данных и переключение игр/лиг.</b> Все цены — с poe2scout.com. Селектор 🎮 в шапке переключает игру (⚔️ PoE 2 / 🏛️ PoE 1 PC) и лигу — данные и набор категорий перезагружаются под выбранный реалм, выбор запоминается отдельно для каждой игры. Базовая валюта зависит от игры: в PoE 2 это Exalted, в PoE 1 — Chaos; подписи единиц в шапке и таблицах меняются автоматически (вторая единица — Chaos в PoE 2 и Exalted в PoE 1). В PoE 1 нет уникалов и крафт-арбитража на poe2scout, поэтому эти блоки скрыты. История — дневные средние за 7 дней плюс живая текущая цена. Обновление — кнопкой «↺ Обновить» или Reload в шапке артефакта.</p>
+            <p><b>Источник данных и переключение игр/лиг.</b> Все цены — с poe2scout.com. Селектор 🎮 в шапке переключает игру (⚔️ PoE 2 / 🏛️ PoE 1 PC) и лигу — данные и набор категорий перезагружаются под выбранный реалм, выбор запоминается отдельно для каждой игры. Базовая валюта зависит от игры: в PoE 2 это Exalted, в PoE 1 — Chaos; подписи единиц в шапке и таблицах меняются автоматически (вторая единица — Chaos в PoE 2 и Exalted в PoE 1). В PoE 1 нет уникалов и крафт-арбитража на poe2scout, поэтому эти блоки скрыты. История — дневные средние за 7 дней плюс живая текущая цена.</p>
+
+            <p style="margin-top:10px"><b>🌍 Общий снапшот и обновление.</b> Чтобы все видели одни и те же цифры и не нагружать API, на GitHub Pages данные берутся из общего файла data.json в репозитории. Обычное открытие сайта <b>не</b> ходит в poe2scout — читает снапшот. Кнопка «↺ Обновить» тянет свежие данные с poe2scout и перезаливает data.json для всех (попросит GitHub-токен со scope repo один раз за сессию — он хранится только в этой вкладке). Снапшот хранится отдельно по каждой связке игра+лига; обновляя одну лигу, ты не затираешь остальные. Если снапшота для выбранной лиги ещё нет — будет разовый живой запрос. В Cowork-превью снапшота нет, там всегда живой запрос.</p>
+
+            <p style="margin-top:10px"><b>📦 Свой стеш и журнал.</b> У каждой связки <b>игра + лига + профиль</b> свой Stash и свой журнал сделок — при переключении игры/лиги/профиля показываются именно их записи. Старые данные перенесены в PoE 2 / Runes of Aldur.</p>
 
             <p style="margin-top:10px"><b>Шапка.</b> Поля 💰 — твои свободные средства в div, ex и chaos: они суммируются по живым курсам в общий бюджет, от которого считаются портфель, фильтр «по карману» и колонка «Кол-во» в таблицах. Селектор 👤 — профили: у каждого профиля свой стеш и свой журнал сделок (бюджет и настройки общие). Чтобы создать профиль, выбери «➕ новый…», введи имя и нажми «ок».</p>
 
