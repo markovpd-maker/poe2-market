@@ -2,7 +2,7 @@
 {
   "name": "Poe2 Market Runes",
   "schemaVersion": 1,
-  "description": "PoE2 Market Dashboard (лига Runes of Aldur), данные poe2scout. Вкладки: Торговая площадка (курсы валют, рекомендованный портфель, журнал сделок, топ-флип/инвест по всем категориям валюты, крафт-арбитраж, раздел уникальных предметов), Price Check (выбор предмета → курс div·ex·c, описание, график истории и аналитика с рекомендацией), Stash (быстрая оценка из буфера Ctrl+C + сохранённые позиции). Аналитика полностью клиентская, без Claude API.",
+  "description": "Мульти-игровой PoE Market Dashboard на данных poe2scout. Переключение игры (PoE 2 / PoE 1 PC) и лиги в шапке; базовая валюта и категории подстраиваются под реалм. Вкладки: Торговая площадка (курсы, портфель, журнал сделок, топ-флип/инвест, крафт-арбитраж и уникалы — для PoE2), Price Check (поиск любого предмета → курс, описание, график, аналитика), Stash (Ctrl+C оценка + сохранённые позиции). Аналитика клиентская, без Claude API.",
   "mcpTools": [
     "mcp__poe2scout-mcp__get_currency_items",
     "mcp__poe2scout-mcp__get_unique_items"
@@ -255,10 +255,15 @@ th.sort:hover { color: #333; }
 <body>
 <div class="header">
   <div>
-    <div class="header-title">⚔️ PoE2 Market · <span>Runes of Aldur</span></div>
+    <div class="header-title" id="brand">⚔️ PoE Market · <span id="brand-league">…</span></div>
     <div id="updated" style="font-size:10px;color:#9090a8;margin-top:1px;">Загружается...</div>
   </div>
   <div class="header-right">
+    <div class="budget-wrap" title="Игра и лига (данные poe2scout)">
+      <label>🎮</label>
+      <select id="game-sel" class="profile-sel" style="max-width:96px" onchange="onGameChange(this.value)"></select>
+      <select id="league-sel" class="profile-sel" style="max-width:150px" onchange="onLeagueChange(this.value)"></select>
+    </div>
     <div class="budget-wrap" title="Профиль: отдельный стеш и журнал сделок">
       <label>👤</label>
       <select id="profile-sel" class="profile-sel" onchange="onProfileSel(this.value)"></select>
@@ -273,11 +278,11 @@ th.sort:hover { color: #333; }
       <input class="budget-input" id="budget" type="number" min="0" step="1" placeholder="0" style="width:52px">
       <span class="budget-unit">div</span>
       <input class="budget-input" id="budget-ex" type="number" min="0" step="1" placeholder="0" style="width:52px">
-      <span class="budget-unit">ex</span>
+      <span class="budget-unit" id="u-base">ex</span>
       <input class="budget-input" id="budget-c" type="number" min="0" step="1" placeholder="0" style="width:52px">
-      <span class="budget-unit">c</span>
+      <span class="budget-unit" id="u-mid">c</span>
     </div>
-    <span class="divine-rate-label">1 div = <span class="divine-rate" id="divine-rate">...</span> ex · 1 c = <span class="divine-rate" id="chaos-rate">...</span> ex</span>
+    <span class="divine-rate-label" id="rate-label">…</span>
     <button class="btn-refresh" onclick="loadAll()">↺ Обновить</button>
   </div>
 </div>
@@ -287,9 +292,21 @@ th.sort:hover { color: #333; }
 </div>
 
 <script>
-const LEAGUE = 'Runes of Aldur';
-let divinePrice = 132.1;
-let chaosPrice  = 12.2;
+// Реалмы poe2scout: poe2 (Exalted-базовая) и pc = PoE1 PC (Chaos-базовая).
+// base = базовая валюта лиги, mid = вторая валюта для отображения (chaos в poe2, exalted в poe1).
+const REALMS = {
+  poe2: { game:'PoE 2', emoji:'⚔️', baseApi:'exalted', baseSh:'ex', midApi:'chaos',   midSh:'c'  },
+  pc:   { game:'PoE 1', emoji:'🏛️', baseApi:'chaos',   baseSh:'c',  midApi:'exalted', midSh:'ex' },
+};
+let REALM  = localStorage.getItem('poe2_realm') || 'poe2';
+if (!REALMS[REALM]) REALM = 'poe2';
+let LEAGUE = localStorage.getItem('poe2_league_' + REALM) || (REALM === 'poe2' ? 'Runes of Aldur' : 'Mirage');
+let U_BASE  = REALMS[REALM].baseSh;   // подпись базовой единицы
+let U_MID   = REALMS[REALM].midSh;    // подпись второй единицы
+let MID_API = REALMS[REALM].midApi;
+let leaguesCache = {};
+let divinePrice = 132.1;   // base-валюта за 1 Divine Orb
+let chaosPrice  = 12.2;    // base-валюта за 1 MID-валюту (имя историческое: toC/fmtC работают через неё)
 let allValidItems = [];
 let allUniques    = []; // уникальные предметы всех категорий (отдельный раздел + Price Check)
 let marketByText  = {}; // Text -> item (валюта + уникалы, для автоподстановки, рыночной цены и Price Check)
@@ -297,36 +314,34 @@ let flipCat   = 'all';
 let investCat = 'all';
 let uniqCat   = 'weapon'; // активная вкладка раздела уникалов
 
-const CAT_LABELS = {
-  all:              '🗂️ Все',
-  currency:         '💰 Currency',
-  runes:            '🪬 Runes',
-  lineagesupportgems: '💠 Lineage Gems',
-  fragments:        '🧩 Fragments',
-  essences:         '🧪 Essences',
-  ultimatum:        '🔮 Soul Cores',
-  breach:           '🌀 Breach',
-  delirium:         '🌫️ Delirium',
-  ritual:           '🩸 Omens',
-  abyss:            '🦴 Abyss',
-  incursion:        '🏛️ Incursion',
-  expedition:       '⛏️ Expedition',
-  vaultkeys:        '🗝️ Reliquary Keys',
-  uncutgems:        '💎 Uncut Gems',
-  idol:             '🗿 Idols',
-  vaal:             '🐉 Vaal',
-  verisium:         '🪙 Verisium',
+// Эмодзи по ApiId категории (poe2 + poe1); неизвестные → 📦.
+const CAT_EMOJI = {
+  currency:'💰', fragments:'🧩', runes:'🪬', lineagesupportgems:'💠', essences:'🧪',
+  ultimatum:'🔮', breach:'🌀', delirium:'🌫️', ritual:'🩸', abyss:'🦴', incursion:'🏛️',
+  expedition:'⛏️', vaultkeys:'🗝️', uncutgems:'💎', idol:'🗿', vaal:'🐉', verisium:'🪙',
+  djinncoins:'🪄', keepers:'👹', allflameembers:'🔥', runegrafts:'🪬', ancestor:'🪶',
+  deliriumorbs:'🌫️', catalysts:'⚗️', oils:'🛢️', delve:'🦴', cards:'🃏',
+  weapon:'⚔️', armour:'🛡️', accessory:'💍', jewel:'🔷', flask:'⚗️', map:'🗺️', sanctum:'🏺',
 };
-// Категории уникальных предметов (раздел «Уникалы» и группа в Price Check)
-const UNIQUE_CATS = {
-  weapon:    '⚔️ Оружие',
-  armour:    '🛡️ Броня',
-  accessory: '💍 Аксессуары',
-  jewel:     '🔷 Самоцветы',
-  flask:     '⚗️ Фласки',
-  map:       '🗺️ Карты',
-  sanctum:   '🏺 Sanctum',
-};
+function catLabel(apiId, label) { return (CAT_EMOJI[apiId] || '📦') + ' ' + (label || apiId); }
+// Строятся динамически из категорий выбранного реалма (см. buildCategories).
+let CAT_LABELS    = { all: '🗂️ Все' };  // валютные категории + 'all'
+let UNIQUE_CATS   = {};                  // unique-категории (пусто = нет уникалов, как в PoE1)
+let CURRENCY_CATS = [];                  // порядок ApiId валютных категорий реалма
+
+function buildCategories(resp) {
+  CAT_LABELS = { all: '🗂️ Все' };
+  CURRENCY_CATS = [];
+  (resp && resp.CurrencyCategories || []).forEach(c => {
+    CAT_LABELS[c.ApiId] = catLabel(c.ApiId, c.Label);
+    CURRENCY_CATS.push(c.ApiId);
+  });
+  UNIQUE_CATS = {};
+  (resp && resp.UniqueCategories || []).forEach(c => { UNIQUE_CATS[c.ApiId] = catLabel(c.ApiId, c.Label); });
+  // активная вкладка уникалов — первая доступная
+  const uks = Object.keys(UNIQUE_CATS);
+  if (!uks.includes(uniqCat)) uniqCat = uks[0] || 'weapon';
+}
 
 const budgetEl   = document.getElementById('budget');
 const budgetExEl = document.getElementById('budget-ex');
@@ -430,7 +445,7 @@ function getBudgetEx() {
 function toDiv(ex) { return ex / divinePrice; }
 function fmtD(ex, dec=2) { return toDiv(ex).toFixed(dec) + ' div'; }
 function toC(ex) { return ex / chaosPrice; }
-function fmtC(ex, dec=1) { return toC(ex).toFixed(dec) + ' c'; }
+function fmtC(ex, dec=1) { return toC(ex).toFixed(dec) + ' ' + U_MID; }
 
 // Иконка предмета рядом с названием (object-fit:contain — без искажений). По имени берёт url из каталога.
 function icoImg(url, px) {
@@ -674,7 +689,7 @@ function renderRates(items) {
     return `<div class="rate-item">
       <div class="r-name" title="${it.Text}" style="display:flex;align-items:center;gap:5px">${icoImg(it.IconUrl,18)}<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${it.Text}</span></div>
       <div class="r-val">${toDiv(ex).toFixed(ex < divinePrice ? 3 : 2)}<span style="font-size:10px;color:#aaa"> div</span></div>
-      <div style="font-size:10px;color:#888">${ex.toFixed(ex < 10 ? 2 : 1)} ex · ${toC(ex).toFixed(1)} c</div>
+      <div style="font-size:10px;color:#888">${ex.toFixed(ex < 10 ? 2 : 1)} ${U_BASE} · ${toC(ex).toFixed(1)} ${U_MID}</div>
       <div class="r-change"><span class="${cls}">${t!==null?arr+' '+Math.abs(t).toFixed(0)+'%':''}</span></div>
     </div>`;
   }).join('');
@@ -913,7 +928,7 @@ function renderPortfolio() {
 
   // Котирование ордеров в выбранной валюте: оба тотала — целые числа (требование биржи).
   // В div/c шаг сетки крупнее — если округлённая продажа ≤ закупки, поднимаем на 1 шаг и помечаем ⚠.
-  const CUR = { ex: {label:'ex', rate:1}, div: {label:'div', rate:divinePrice}, c: {label:'c', rate:chaosPrice} };
+  const CUR = { ex: {label:U_BASE, rate:1}, div: {label:'div', rate:divinePrice}, c: {label:U_MID, rate:chaosPrice} };
   const cur = CUR[pfCur] || CUR.ex;
   function quote(r) {
     const buyTot  = Math.max(1, Math.round(r.qty * r.buyExI / cur.rate));
@@ -945,8 +960,8 @@ function renderPortfolio() {
         ${icoImg(r.it.IconUrl)}
         <div class="pf-info">
           <div class="pf-name" title="${r.it.Text}">${r.it.Text}</div>
-          <div class="pf-detail" style="color:#1565c0;font-weight:600">закупка: ${r.qty} шт за ${r.buyTot} ${cur.label} (≈${unitBuyEx.toFixed(0)} ex/шт)</div>
-          <div class="pf-detail" style="color:#2e7d32">${modeLabel}: ${r.qty} шт за ${r.sellTot} ${cur.label} (≈${unitSellEx.toFixed(0)} ex/шт)</div>
+          <div class="pf-detail" style="color:#1565c0;font-weight:600">закупка: ${r.qty} шт за ${r.buyTot} ${cur.label} (≈${unitBuyEx.toFixed(0)} ${U_BASE}/шт)</div>
+          <div class="pf-detail" style="color:#2e7d32">${modeLabel}: ${r.qty} шт за ${r.sellTot} ${cur.label} (≈${unitSellEx.toFixed(0)} ${U_BASE}/шт)</div>
           <div class="pf-detail">итого закупка: ${fmtD(r.costEx, 1)} ≈ ${fmtC(r.costEx, 0)}${r.gridWarn ? ' <span class="grid-warn">⚠ шаг цены в ' + cur.label + ' крупнее маржи — продажа округлена вверх</span>' : ''}</div>
         </div>
         <div class="pf-alloc">
@@ -970,9 +985,9 @@ function renderPortfolio() {
       </span>
       <span style="margin-left:auto;display:flex;align-items:center;gap:4px">
         <label>Ордеры в:</label>
-        <button class="cur-btn ${pfCur==='ex'?'active':''}"  onclick="setPfCur('ex')">ex</button>
+        <button class="cur-btn ${pfCur==='ex'?'active':''}"  onclick="setPfCur('ex')">${U_BASE}</button>
         <button class="cur-btn ${pfCur==='div'?'active':''}" onclick="setPfCur('div')">div</button>
-        <button class="cur-btn ${pfCur==='c'?'active':''}"   onclick="setPfCur('c')">chaos</button>
+        <button class="cur-btn ${pfCur==='c'?'active':''}"   onclick="setPfCur('c')">${U_MID}</button>
       </span>
     </div>`;
 
@@ -1119,9 +1134,9 @@ function renderTracker(keepItem) {
       <input id="tr-qty" type="number" min="1" step="1" placeholder="кол-во" style="width:70px">
       <input id="tr-price" type="number" min="0" step="any" placeholder="цена/шт" style="width:80px">
       <select id="tr-cur">
-        <option value="ex">ex</option>
+        <option value="ex">${U_BASE}</option>
         <option value="div">div</option>
-        <option value="c">chaos</option>
+        <option value="c">${U_MID}</option>
       </select>
       <button class="tr-btn" onclick="addTrade()">+ Записать</button>
       <span class="tr-err" id="tr-err"></span>
@@ -1288,8 +1303,8 @@ function pcEvaluate() {
       <div class="verdict-badge ${a.cls}" style="margin-left:auto">${a.verdict}</div>
     </div>
     <div class="pc-prices">
-      <div class="pc-price-box"><div class="lbl">за 1 шт</div><div class="val">${unit.toFixed(unit<10?2:1)} ex</div><div class="bid-sub">${toDiv(unit).toFixed(3)} div · ${toC(unit).toFixed(1)} c</div></div>
-      <div class="pc-price-box"><div class="lbl">стак (${qty} шт)</div><div class="val">${stack.toFixed(0)} ex</div><div class="bid-sub">${toDiv(stack).toFixed(2)} div · ${toC(stack).toFixed(0)} c</div></div>
+      <div class="pc-price-box"><div class="lbl">за 1 шт</div><div class="val">${unit.toFixed(unit<10?2:1)} ${U_BASE}</div><div class="bid-sub">${toDiv(unit).toFixed(3)} div · ${toC(unit).toFixed(1)} ${U_MID}</div></div>
+      <div class="pc-price-box"><div class="lbl">стак (${qty} шт)</div><div class="val">${stack.toFixed(0)} ${U_BASE}</div><div class="bid-sub">${toDiv(stack).toFixed(2)} div · ${toC(stack).toFixed(0)} ${U_MID}</div></div>
     </div>
     ${a.reasons.map(r => `<div class="pc-reason">${r}</div>`).join('')}
     <div class="pc-reason" style="color:#aaa;margin-top:4px">Оценка по 7-дневной динамике poe2scout; патчи, анонсы и конец лиги не учитываются.</div>
@@ -1388,8 +1403,8 @@ function renderStash() {
         </div></div>
       </td>
       <td>${x.qty} шт</td>
-      <td><div class="price-now">${unit.toFixed(unit<10?2:1)} ex</div><div class="bid-sub">${toDiv(unit).toFixed(3)} div · ${toC(unit).toFixed(1)} c</div></td>
-      <td><div class="price-now">${toDiv(now).toFixed(2)} div</div><div class="bid-sub">${now.toFixed(0)} ex · ${toC(now).toFixed(0)} c</div></td>
+      <td><div class="price-now">${unit.toFixed(unit<10?2:1)} ${U_BASE}</div><div class="bid-sub">${toDiv(unit).toFixed(3)} div · ${toC(unit).toFixed(1)} ${U_MID}</div></td>
+      <td><div class="price-now">${toDiv(now).toFixed(2)} div</div><div class="bid-sub">${now.toFixed(0)} ${U_BASE} · ${toC(now).toFixed(0)} ${U_MID}</div></td>
       <td><span class="${d>=0?'pnl-pos':'pnl-neg'}">${d>=0?'+':''}${d.toFixed(1)}%</span><div class="bid-sub">с добавления</div></td>
       <td>${a ? `<span style="font-size:11px;font-weight:700" class="${a.cls==='verdict-sell'?'pnl-neg':a.cls==='verdict-hold'?'pnl-pos':'pnl-na'}">${a.verdict}</span>` : '<span class="pnl-na">нет данных</span>'}</td>
       <td><button class="tr-del" onclick="stashDel(${x.id})" title="продано / убрать">✕</button></td>
@@ -1408,7 +1423,7 @@ function renderStash() {
     </tr></thead>
     <tbody>${rows}</tbody></table></div>
     <div class="pf-summary">
-      <div class="pf-summary-item">💎 Стеш сейчас: <span>${toDiv(totNowEx).toFixed(2)} div · ${fmtC(totNowEx,0)} · ${totNowEx.toFixed(0)} ex</span></div>
+      <div class="pf-summary-item">💎 Стеш сейчас: <span>${toDiv(totNowEx).toFixed(2)} div · ${fmtC(totNowEx,0)} · ${totNowEx.toFixed(0)} ${U_BASE}</span></div>
       <div class="pf-summary-item">Δ с добавления: <span class="${dTot>=0?'pnl-pos':'pnl-neg'}">${dTot>=0?'+':''}${toDiv(totNowEx-totAddEx).toFixed(2)} div (${dTot.toFixed(1)}%)</span></div>
     </div>`;
 }
@@ -1439,7 +1454,7 @@ function renderUniqTable() {
     .sort((a,b) => b.CurrentPrice - a.CurrentPrice)
     .slice(0, 20);
   if (!items.length) return '<div class="no-data">Нет данных по уникалам в этой категории</div>';
-  const hdr = `<tr><th>#</th><th>Предмет</th><th>Цена (div)</th><th>ex · c</th><th>Ликвидность</th><th>7д тренд</th><th></th></tr>`;
+  const hdr = `<tr><th>#</th><th>Предмет</th><th>Цена (div)</th><th>${U_BASE} · ${U_MID}</th><th>Ликвидность</th><th>7д тренд</th><th></th></tr>`;
   const rows = items.map((it, i) => {
     const liq = uniqLiquidity(it);
     const t7 = trendPct(it.PriceLogs, 7);
@@ -1452,7 +1467,7 @@ function renderUniqTable() {
         <div><div class="uniq-name">${it.Name || it.Text}</div><div class="uniq-base">${base}</div></div>
       </div></td>
       <td><div class="price-now">${toDiv(it.CurrentPrice).toFixed(toDiv(it.CurrentPrice)<10?2:0)} div</div></td>
-      <td><div class="bid-sub" style="color:#888">${it.CurrentPrice.toFixed(0)} ex · ${toC(it.CurrentPrice).toFixed(0)} c</div></td>
+      <td><div class="bid-sub" style="color:#888">${it.CurrentPrice.toFixed(0)} ${U_BASE} · ${toC(it.CurrentPrice).toFixed(0)} ${U_MID}</div></td>
       <td><span class="liq-badge ${liq.cls}">${liq.label}</span></td>
       <td>${trendEl(t7)}</td>
       <td><button class="cur-btn" style="font-size:10px" onclick="pcxOpen('${(it.Text||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}')">📊 разбор</button></td>
@@ -1570,8 +1585,8 @@ function renderPcx(it) {
     </div>
     <div class="pcx-prices">
       <div class="pcx-pbox"><div class="lbl">Divine</div><div class="val">${toDiv(ex).toFixed(toDiv(ex)<10?3:2)} <span class="unit">div</span></div></div>
-      <div class="pcx-pbox"><div class="lbl">Exalted</div><div class="val">${ex.toFixed(ex<10?2:0)} <span class="unit">ex</span></div></div>
-      <div class="pcx-pbox"><div class="lbl">Chaos</div><div class="val">${toC(ex).toFixed(toC(ex)<10?2:0)} <span class="unit">c</span></div></div>
+      <div class="pcx-pbox"><div class="lbl">${U_BASE==='ex'?'Exalted':'Chaos'}</div><div class="val">${ex.toFixed(ex<10?2:0)} <span class="unit">${U_BASE}</span></div></div>
+      <div class="pcx-pbox"><div class="lbl">${U_MID==='c'?'Chaos':'Exalted'}</div><div class="val">${toC(ex).toFixed(toC(ex)<10?2:0)} <span class="unit">${U_MID}</span></div></div>
     </div>
     <div class="pcx-grid">
       <div class="pcx-chart-card">
@@ -1620,7 +1635,7 @@ function drawPcxChart(it) {
     options: {
       responsive: true, maintainAspectRatio: false,
       plugins: { legend: { display: false },
-        tooltip: { callbacks: { label: c => `${c.parsed.y} div · ${(c.parsed.y*divinePrice).toFixed(0)} ex` } } },
+        tooltip: { callbacks: { label: c => `${c.parsed.y} div · ${(c.parsed.y*divinePrice).toFixed(0)} ${U_BASE}` } } },
       scales: {
         y: { ticks: { font: { size: 10 }, callback: v => v + ' div' }, grid: { color: '#f0f0f0' } },
         x: { ticks: { font: { size: 10 }, maxRotation: 0, autoSkip: true }, grid: { display: false } },
@@ -1630,36 +1645,51 @@ function drawPcxChart(it) {
 }
 
 /* ── Data layer ──
-   В Cowork данные идут через MCP (window.cowork). Standalone (GitHub Pages и т.п.) —
-   напрямую из публичного API poe2scout: /api/poe2/Leagues/{league}/Currencies/ByCategory.
-   Формат Items идентичен MCP-ответу. */
-const API_BASE = 'https://poe2scout.com/api/poe2/Leagues/' + encodeURIComponent(LEAGUE);
+   Реалм в пути: poe2scout.com/api/{REALM}/Leagues/{league}/...
+   REALM='poe2' (Exalted-база) или 'pc' = PoE1 PC (Chaos-база).
+   poe2 — можно через MCP (window.cowork); pc — только публичный API (MCP знает лишь poe2). */
+function apiBase() { return 'https://poe2scout.com/api/' + REALM + '/Leagues/' + encodeURIComponent(LEAGUE); }
+
+async function fetchLeagues(realm) {
+  if (leaguesCache[realm]) return leaguesCache[realm];
+  const d = await fetchJsonCors('https://poe2scout.com/api/' + realm + '/Leagues');
+  const arr = Array.isArray(d) ? d : [];
+  if (arr.length) leaguesCache[realm] = arr;
+  return arr;
+}
+
+async function fetchCategoriesResp() {
+  const d = await fetchJsonCors(apiBase() + '/Items/Categories');
+  return d || { CurrencyCategories: [], UniqueCategories: [] };
+}
 
 async function fetchCategory(cat) {
-  if (window.cowork?.callMcpTool) {
+  if (REALM === 'poe2' && window.cowork?.callMcpTool) {
     try {
       const r = await window.cowork.callMcpTool('mcp__poe2scout-mcp__get_currency_items', { category: cat, league: LEAGUE, limit: 100 });
-      if (!r || r.isError) return [];
-      const d = r.structuredContent ?? (r.content?.[0] ? JSON.parse(r.content[0].text) : []);
-      return Array.isArray(d) ? d : [];
-    } catch { return []; }
+      if (r && !r.isError) {
+        const d = r.structuredContent ?? (r.content?.[0] ? JSON.parse(r.content[0].text) : []);
+        if (Array.isArray(d) && d.length) return d;
+      }
+    } catch {}
   }
-  const url = `${API_BASE}/Currencies/ByCategory?Category=${encodeURIComponent(cat)}&Page=1&PerPage=250`;
+  const url = `${apiBase()}/Currencies/ByCategory?Category=${encodeURIComponent(cat)}&Page=1&PerPage=250`;
   const d = await fetchJsonCors(url);
   return Array.isArray(d?.Items) ? d.Items : [];
 }
 
 // Уникальные предметы по категории (формат Items идентичен валюте + ItemMetadata)
 async function fetchUniqueCategory(cat) {
-  if (window.cowork?.callMcpTool) {
+  if (REALM === 'poe2' && window.cowork?.callMcpTool) {
     try {
       const r = await window.cowork.callMcpTool('mcp__poe2scout-mcp__get_unique_items', { category: cat, league: LEAGUE, limit: 100 });
-      if (!r || r.isError) return [];
-      const d = r.structuredContent ?? (r.content?.[0] ? JSON.parse(r.content[0].text) : []);
-      return Array.isArray(d) ? d : [];
-    } catch { return []; }
+      if (r && !r.isError) {
+        const d = r.structuredContent ?? (r.content?.[0] ? JSON.parse(r.content[0].text) : []);
+        if (Array.isArray(d) && d.length) return d;
+      }
+    } catch {}
   }
-  const url = `${API_BASE}/Uniques/ByCategory?Category=${encodeURIComponent(cat)}&Page=1&PerPage=100`;
+  const url = `${apiBase()}/Uniques/ByCategory?Category=${encodeURIComponent(cat)}&Page=1&PerPage=100`;
   const d = await fetchJsonCors(url);
   return Array.isArray(d?.Items) ? d.Items : [];
 }
@@ -1703,7 +1733,7 @@ async function fetchJsonCors(url) {
   ov.id = 'pw-overlay';
   ov.style.cssText = 'position:fixed;inset:0;background:linear-gradient(135deg,#1a1a2e,#16213e);z-index:9999;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px';
   ov.innerHTML = `
-    <div style="color:#c9a84c;font-size:20px;font-weight:700">⚔️ PoE2 Market · Runes of Aldur</div>
+    <div style="color:#c9a84c;font-size:20px;font-weight:700">⚔️ PoE Market · poe2scout</div>
     <input id="pw-inp" type="password" placeholder="пароль" autocomplete="off"
       style="padding:9px 14px;border-radius:8px;border:1px solid #c9a84c55;background:#ffffff12;color:#ffd700;outline:none;text-align:center;font-size:15px">
     <div id="pw-err" style="color:#f44336;font-size:12px;height:15px"></div>`;
@@ -1717,16 +1747,56 @@ async function fetchJsonCors(url) {
   setTimeout(() => inp.focus(), 100);
 })();
 
+/* ── Селекторы игры и лиги ── */
+function fillGameLeagueSel(leagues) {
+  const gs = document.getElementById('game-sel');
+  if (gs) gs.innerHTML = Object.keys(REALMS).map(r =>
+    `<option value="${r}" ${r===REALM?'selected':''}>${REALMS[r].emoji} ${REALMS[r].game}</option>`).join('');
+  const ls = document.getElementById('league-sel');
+  if (ls) ls.innerHTML = (leagues||[]).slice().sort((a,b)=>(a.IsCurrent?0:1)-(b.IsCurrent?0:1))
+    .map(l => `<option value="${(l.Value||'').replace(/"/g,'&quot;')}" ${l.Value===LEAGUE?'selected':''}>${l.IsCurrent?'🟢 ':''}${l.Value}</option>`).join('');
+}
+async function onGameChange(realm) {
+  if (!REALMS[realm] || realm === REALM) return;
+  REALM = realm;
+  localStorage.setItem('poe2_realm', REALM);
+  U_BASE = REALMS[REALM].baseSh; U_MID = REALMS[REALM].midSh; MID_API = REALMS[REALM].midApi;
+  LEAGUE = localStorage.getItem('poe2_league_' + REALM) || '';
+  const leagues = await fetchLeagues(REALM);
+  if (!leagues.some(l => l.Value === LEAGUE)) {
+    const cur = leagues.find(l => l.IsCurrent && !/^HC /i.test(l.Value)) || leagues.find(l => l.IsCurrent) || leagues[0];
+    LEAGUE = cur ? cur.Value : LEAGUE;
+  }
+  localStorage.setItem('poe2_league_' + REALM, LEAGUE);
+  flipCat = 'all'; investCat = 'all';            // наборы категорий у игр разные
+  pcxCurrent = null;
+  loadAll();
+}
+function onLeagueChange(v) {
+  if (!v || v === LEAGUE) return;
+  LEAGUE = v;
+  localStorage.setItem('poe2_league_' + REALM, LEAGUE);
+  loadAll();
+}
+
 /* ── Main (v3) ── */
 async function loadAll() {
-  document.getElementById('root').innerHTML = `<div class="loading"><div class="spinner"></div><br>Загружаем данные с poe2scout...</div>`;
+  document.getElementById('root').innerHTML = `<div class="loading"><div class="spinner"></div><br>Загружаем данные с poe2scout…</div>`;
   document.getElementById('updated').textContent = 'Загружается...';
-  document.getElementById('divine-rate').textContent = '...';
-  const crReset = document.getElementById('chaos-rate');
-  if (crReset) crReset.textContent = '...';
+  const rlReset = document.getElementById('rate-label'); if (rlReset) rlReset.textContent = '…';
 
   try {
-    const cats = ['currency','fragments','runes','essences','ultimatum','breach','delirium','lineagesupportgems','incursion','ritual','abyss','expedition','vaultkeys','uncutgems','idol','vaal','verisium'];
+    // лиги реалма → селекторы игры/лиги; если выбранная лига пропала, берём текущую (не HC)
+    const leagues = await fetchLeagues(REALM);
+    if (leagues.length && !leagues.some(l => l.Value === LEAGUE)) {
+      const cur = leagues.find(l => l.IsCurrent && !/^HC /i.test(l.Value)) || leagues.find(l => l.IsCurrent) || leagues[0];
+      if (cur) { LEAGUE = cur.Value; localStorage.setItem('poe2_league_' + REALM, LEAGUE); }
+    }
+    fillGameLeagueSel(leagues);
+    // категории реалма (валюта + уникалы) — динамически
+    buildCategories(await fetchCategoriesResp());
+
+    const cats = CURRENCY_CATS.length ? CURRENCY_CATS : ['currency'];
     const uniqCats = Object.keys(UNIQUE_CATS);
     const [results, uniqResults] = await Promise.all([
       Promise.all(cats.map(cat => fetchCategory(cat))),
@@ -1757,13 +1827,18 @@ async function loadAll() {
       return;
     }
 
+    U_BASE = REALMS[REALM].baseSh; U_MID = REALMS[REALM].midSh; MID_API = REALMS[REALM].midApi;
     const divItem = currency.find(c => c.ApiId === 'divine');
     if (divItem?.CurrentPrice > 0) divinePrice = divItem.CurrentPrice;
-    const chaosItem = currency.find(c => c.ApiId === 'chaos');
-    if (chaosItem?.CurrentPrice > 0) chaosPrice = chaosItem.CurrentPrice;
-    document.getElementById('divine-rate').textContent = divinePrice.toFixed(1);
-    const crEl = document.getElementById('chaos-rate');
-    if (crEl) crEl.textContent = chaosPrice.toFixed(1);
+    // mid-валюта: chaos (poe2) / exalted (poe1). В базовой лиге сама base-валюта = 1.
+    const midItem = currency.find(c => c.ApiId === MID_API);
+    chaosPrice = (midItem && midItem.CurrentPrice > 0) ? midItem.CurrentPrice : 1;
+    const ub = document.getElementById('u-base'); if (ub) ub.textContent = U_BASE;
+    const um = document.getElementById('u-mid');  if (um) um.textContent = U_MID;
+    const rlEl = document.getElementById('rate-label');
+    if (rlEl) rlEl.innerHTML = `1 div = <span class="divine-rate">${divinePrice.toFixed(divinePrice<10?2:1)}</span> ${U_BASE} · 1 ${U_MID} = <span class="divine-rate">${chaosPrice.toFixed(chaosPrice<10?2:1)}</span> ${U_BASE}`;
+    const brandEl = document.getElementById('brand');
+    if (brandEl) brandEl.innerHTML = `${REALMS[REALM].emoji} ${REALMS[REALM].game} · <span id="brand-league">${LEAGUE}</span>`;
 
     // каталог всех предметов для автоподстановки, рыночных цен трекера и Price Check
     marketByText = {};
@@ -1771,8 +1846,8 @@ async function loadAll() {
     // уникалы тоже в каталог (Price Check, журнал, стеш) — валюта приоритетнее при коллизии имён
     allUniques.forEach(it => { if (it.Text && !marketByText[it.Text]) marketByText[it.Text] = it; });
 
-    const excludeIds = new Set(['divine','mirror','exalted']);
-    const minEx = divinePrice; // порог 1 div
+    const excludeIds = new Set(['divine','mirror', REALMS[REALM].baseApi, MID_API]);
+    const minEx = divinePrice; // порог 1 div (в base-валюте)
 
     allValidItems = allCurrency
       .filter(it => it.CurrentPrice >= minEx && safeLogs(it.PriceLogs).length >= 2
@@ -1785,7 +1860,7 @@ async function loadAll() {
       }));
 
     const now = new Date().toLocaleTimeString('ru', { hour:'2-digit', minute:'2-digit' });
-    document.getElementById('updated').textContent = `Обновлено в ${now} · poe2scout.com`;
+    document.getElementById('updated').textContent = `Обновлено в ${now} · poe2scout.com · ${REALMS[REALM].game} · ${LEAGUE}`;
 
     const runesItems     = byCategory['runes']     || [];
     const fragmentsItems = byCategory['fragments'] || [];
@@ -1803,7 +1878,7 @@ async function loadAll() {
           <div class="card"><div class="card-header" style="background:#e8eaf6;color:#283593">📖 Как пользоваться дашбордом</div>
           <div style="padding:14px 16px;font-size:13px;line-height:1.55;color:#333">
 
-            <p><b>Источник данных.</b> Все цены — с poe2scout.com (лига Runes of Aldur), в exalted orbs. История — дневные средние за 7 дней плюс живая текущая цена. Данные обновляются кнопкой «↺ Обновить» или кнопкой Reload в шапке окна артефакта.</p>
+            <p><b>Источник данных и переключение игр/лиг.</b> Все цены — с poe2scout.com. Селектор 🎮 в шапке переключает игру (⚔️ PoE 2 / 🏛️ PoE 1 PC) и лигу — данные и набор категорий перезагружаются под выбранный реалм, выбор запоминается отдельно для каждой игры. Базовая валюта зависит от игры: в PoE 2 это Exalted, в PoE 1 — Chaos; подписи единиц в шапке и таблицах меняются автоматически (вторая единица — Chaos в PoE 2 и Exalted в PoE 1). В PoE 1 нет уникалов и крафт-арбитража на poe2scout, поэтому эти блоки скрыты. История — дневные средние за 7 дней плюс живая текущая цена. Обновление — кнопкой «↺ Обновить» или Reload в шапке артефакта.</p>
 
             <p style="margin-top:10px"><b>Шапка.</b> Поля 💰 — твои свободные средства в div, ex и chaos: они суммируются по живым курсам в общий бюджет, от которого считаются портфель, фильтр «по карману» и колонка «Кол-во» в таблицах. Селектор 👤 — профили: у каждого профиля свой стеш и свой журнал сделок (бюджет и настройки общие). Чтобы создать профиль, выбери «➕ новый…», введи имя и нажми «ок».</p>
 
@@ -1861,14 +1936,14 @@ async function loadAll() {
               <datalist id="pcx-dl"></datalist>
               <button class="cur-btn" onclick="var i=document.getElementById('pcx-input');i.value='';i.focus();pcxSelect('')">сброс</button>
             </div>
-            <div id="pcx-result"><div class="no-data">Выбери предмет из списка — покажу курс в div · ex · c, историю цены и аналитику с рекомендацией</div></div>
+            <div id="pcx-result"><div class="no-data">Выбери предмет из списка — покажу курс (div и базовая валюта игры), историю цены и аналитику с рекомендацией</div></div>
           </div>
         </div>
       </div>
       <div id="tab-market" style="display:${mainTab==='market'?'':'none'}">
       <div class="content">
         <div class="card">
-          <div class="card-header rates coll" onclick="toggleSec('rates')">${chev('rates')}💰 Курсы валют <span class="badge badge-rates">div · ex · c</span></div>
+          <div class="card-header rates coll" onclick="toggleSec('rates')">${chev('rates')}💰 Курсы валют <span class="badge badge-rates">div · ${U_BASE} · ${U_MID}</span></div>
           <div id="sec-rates" style="${secStyle('rates')}"><div class="rates-grid">${renderRates(currency)}</div></div>
         </div>
         <div class="portfolio-block">
@@ -1896,15 +1971,15 @@ async function loadAll() {
             </div>
           </div>
         </div>
-        ${renderCraftBlock(runesItems, fragmentsItems, incursionItems)}
-        <div class="card uniq-block">
+        ${REALM === 'poe2' ? renderCraftBlock(runesItems, fragmentsItems, incursionItems) : ''}
+        ${uniqCats.length ? `<div class="card uniq-block">
           <div class="card-header coll" onclick="toggleSec('uniq')">${chev('uniq')}⭐ Уникальные предметы <span class="badge" style="background:#ad1457;color:#fff;margin-left:auto">${allUniques.length}</span></div>
           <div id="sec-uniq" style="${secStyle('uniq')}">
-            <div class="craft-note">Топ-20 по цене в категории. Цена в exalted, как у валюты; маленькая ликвидность = ненадёжная цена (часто 1–3 тролльных листинга). «📊 разбор» открывает Price Check.</div>
+            <div class="craft-note">Топ-20 по цене в категории. Цена в base-валюте; маленькая ликвидность = ненадёжная цена (часто 1–3 тролльных листинга). «📊 разбор» открывает Price Check.</div>
             <div class="cat-tabs" id="uniq-tabs">${uniqTabsHtml()}</div>
             <div id="uniq-content"></div>
           </div>
-        </div>
+        </div>` : ''}
       </div>
       </div>`;
 
