@@ -1662,11 +1662,11 @@ function drawPcxChart(it) {
    Реалм в пути: poe2scout.com/api/{REALM}/Leagues/{league}/...
    REALM='poe2' (Exalted-база) или 'pc' = PoE1 PC (Chaos-база).
    poe2 — можно через MCP (window.cowork); pc — только публичный API (MCP знает лишь poe2). */
-function apiBase() { return 'https://poe2scout.com/api/' + REALM + '/Leagues/' + encodeURIComponent(LEAGUE); }
+function apiBase() { return 'https://api.poe2scout.com/' + REALM + '/Leagues/' + encodeURIComponent(LEAGUE); }
 
 async function fetchLeagues(realm) {
   if (leaguesCache[realm]) return leaguesCache[realm];
-  const d = await fetchJsonCors('https://poe2scout.com/api/' + realm + '/Leagues');
+  const d = await fetchJsonCors('https://api.poe2scout.com/' + realm + '/Leagues');
   const arr = Array.isArray(d) ? d : [];
   if (arr.length) leaguesCache[realm] = arr;
   return arr;
