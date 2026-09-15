@@ -605,7 +605,7 @@ function unitsCanBuy(buyEx) {
 function marginCls(m) {
   return m >= 15 ? 'margin-good' : m >= 7 ? 'margin-ok' : 'margin-low';
 }
-const MIN_FLIP_MARGIN = 10; // %
+const MIN_FLIP_MARGIN = 5; // %
 function passesFlipMargin(it) {
   const b = getFlipBids(it.PriceLogs, it.CurrentPrice);
   return b && b.margin >= MIN_FLIP_MARGIN;
