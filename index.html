@@ -292,11 +292,12 @@ th.sort:hover { color: #333; }
 </div>
 
 <script>
-// Реалмы poe2scout: poe2 (Exalted-базовая) и pc = PoE1 PC (Chaos-базовая).
-// base = базовая валюта лиги, mid = вторая валюта для отображения (chaos в poe2, exalted в poe1).
+// Реалмы poe2scout. nativeApi — в чём API реально отдаёт CurrentPrice (менять нельзя, это факт API).
+// baseApi — рабочая валюта расчётов/бюджета (её МОЖНО менять); если она не совпадает с nativeApi,
+// весь датасет один раз пересчитывается при загрузке (см. rebaseToWorkUnit). midApi — вторая, справочная.
 const REALMS = {
-  poe2: { game:'PoE 2', emoji:'⚔️', baseApi:'exalted', baseSh:'ex', midApi:'chaos',   midSh:'c'  },
-  pc:   { game:'PoE 1', emoji:'🏛️', baseApi:'chaos',   baseSh:'c',  midApi:'exalted', midSh:'ex' },
+  poe2: { game:'PoE 2', emoji:'⚔️', nativeApi:'exalted', baseApi:'chaos',   baseSh:'c',  midApi:'exalted', midSh:'ex' },
+  pc:   { game:'PoE 1', emoji:'🏛️', nativeApi:'chaos',   baseApi:'chaos',   baseSh:'c',  midApi:'exalted', midSh:'ex' },
 };
 let REALM  = localStorage.getItem('poe2_realm') || 'poe2';
 if (!REALMS[REALM]) REALM = 'poe2';
@@ -306,8 +307,8 @@ let U_MID   = REALMS[REALM].midSh;    // подпись второй едини�
 let MID_API = REALMS[REALM].midApi;
 let leaguesCache = {};
 let usingSnapshot = null; // {savedAt} когда данные показаны из локального кэша data.json, а не с живого API
-let divinePrice = 132.1;   // base-валюта за 1 Divine Orb
-let chaosPrice  = 12.2;    // base-валюта за 1 MID-валюту (имя историческое: toC/fmtC работают через неё)
+let divinePrice = 8.6;    // base-валюта за 1 Divine Orb (дефолт по факту пересчитан после первой загрузки)
+let chaosPrice  = 0.04;   // base-валюта за 1 MID-валюту (имя историческое: toC/fmtC работают через неё)
 let allValidItems = [];
 let allUniques    = []; // уникальные предметы всех категорий (отдельный раздел + Price Check)
 let marketByText  = {}; // Text -> item (валюта + уникалы, для автоподстановки, рыночной цены и Price Check)
@@ -448,6 +449,28 @@ function deleteProfile() {
   saveProfiles(rest);
   btn.textContent = '🗑';
   setProfile(rest[0]);
+}
+
+/* ── Пересчёт в рабочую валюту ──
+   API всегда отдаёт CurrentPrice в nativeApi реалма (для poe2 — в exalted).
+   Если рабочая валюта (baseApi) от неё отличается — пересчитываем ВСЕ цены и
+   PriceLogs один раз сразу после загрузки, дальше по коду ничего не меняется:
+   вся математика (флип/инвест/бюджет) как и раньше просто оперирует числом в U_BASE. */
+function rebaseToWorkUnit(byCategory, uniques, realmCfg) {
+  if (realmCfg.baseApi === realmCfg.nativeApi) return; // уже в рабочей валюте, пересчёт не нужен
+  const allCur = Object.values(byCategory).flat().filter(Boolean);
+  const baseItem = allCur.find(c => c.ApiId === realmCfg.baseApi);
+  if (!(baseItem?.CurrentPrice > 0)) {
+    console.warn('rebaseToWorkUnit: валюта', realmCfg.baseApi, 'не найдена в данных — пересчёт пропущен');
+    return;
+  }
+  const factor = 1 / baseItem.CurrentPrice; // native → work (например exalted → chaos)
+  const scale = it => {
+    if (typeof it.CurrentPrice === 'number') it.CurrentPrice *= factor;
+    if (Array.isArray(it.PriceLogs)) it.PriceLogs.forEach(l => { if (typeof l.Price === 'number') l.Price *= factor; });
+  };
+  allCur.forEach(scale);
+  (uniques || []).forEach(scale);
 }
 
 // Общий бюджет в exalted: div + ex + chaos по текущим курсам
@@ -1936,6 +1959,8 @@ async function loadAll() {
     }
 
     U_BASE = REALMS[REALM].baseSh; U_MID = REALMS[REALM].midSh; MID_API = REALMS[REALM].midApi;
+    // API отдаёт цены в nativeApi реалма — если рабочая валюта другая (poe2: chaos), пересчитываем один раз
+    rebaseToWorkUnit(byCategory, allUniques, REALMS[REALM]);
     const currency = byCategory['currency'] || [];
     const divItem = currency.find(c => c.ApiId === 'divine');
     if (divItem?.CurrentPrice > 0) divinePrice = divItem.CurrentPrice;
