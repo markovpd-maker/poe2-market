@@ -305,6 +305,7 @@ let U_BASE  = REALMS[REALM].baseSh;   // подпись базовой един�
 let U_MID   = REALMS[REALM].midSh;    // подпись второй единицы
 let MID_API = REALMS[REALM].midApi;
 let leaguesCache = {};
+let usingSnapshot = null; // {savedAt} когда данные показаны из локального кэша data.json, а не с живого API
 let divinePrice = 132.1;   // base-валюта за 1 Divine Orb
 let chaosPrice  = 12.2;    // base-валюта за 1 MID-валюту (имя историческое: toC/fmtC работают через неё)
 let allValidItems = [];
@@ -1784,6 +1785,32 @@ async function mapLimit(arr, n, fn) {
   return out;
 }
 
+/* ── Локальный кэш data.json ──
+   Лежит в этом же репозитории и обновляется раз в час через GitHub Actions
+   (workflow .github/workflows/update-data.yml, скрипт scripts/fetch-snapshot.mjs).
+   Читается с того же домена github.io, поэтому CORS тут не участвует —
+   это подстраховка на случай, когда живой API или все прокси недоступны. */
+let snapshotFileCache = null;
+async function loadSnapshotData(realm, league) {
+  try {
+    if (!snapshotFileCache) {
+      const r = await fetch('./data.json', { cache: 'no-store' });
+      if (!r.ok) return null;
+      snapshotFileCache = await r.json();
+    }
+    const snaps = snapshotFileCache?.snapshots || {};
+    let key = realm + '|' + league;
+    let snap = snaps[key];
+    if (!snap) {
+      // нужной лиги нет в кэше (сменилась/название другое) — берём любую сохранённую для этого реалма
+      key = Object.keys(snaps).find(k => k.startsWith(realm + '|'));
+      snap = key ? snaps[key] : null;
+    }
+    if (!snap) return null;
+    return { snap, league: key.slice(realm.length + 1) };
+  } catch (e) { console.warn('data.json fallback fail:', e.message); return null; }
+}
+
 /* ── JS-пароль для standalone-версии (в Cowork не запрашивается).
    Это лишь лёгкий заслон от случайных глаз: проверка на клиенте, обходится через devtools. */
 (function pwGate() {
@@ -1856,33 +1883,51 @@ async function loadAll() {
     // категории реалма (валюта + уникалы) — динамически
     buildCategories(await fetchCategoriesResp());
 
-    const cats = CURRENCY_CATS.length ? CURRENCY_CATS : ['currency'];
-    const uniqCats = Object.keys(UNIQUE_CATS);
-    // через публичный прокси нельзя слать всё разом — лимит 3 одновременных запроса
-    const results     = await mapLimit(cats, 3, cat => fetchCategory(cat));
-    const uniqResults = await mapLimit(uniqCats, 3, cat => fetchUniqueCategory(cat));
-
-    const byCategory = {};
-    cats.forEach((cat, i) => { byCategory[cat] = results[i]; });
-
-    // уникалы: тег категории + единый массив
+    let cats = CURRENCY_CATS.length ? CURRENCY_CATS : ['currency'];
+    let uniqCats = Object.keys(UNIQUE_CATS);
+    let byCategory = {};
     allUniques = [];
-    uniqCats.forEach((cat, i) => {
-      (uniqResults[i] || []).forEach(u => {
-        if (!u || !(u.CurrentPrice > 0)) return;
-        u.CategoryApiId = u.CategoryApiId || cat;
-        allUniques.push(u);
-      });
-    });
+    usingSnapshot = null;
 
-    const currency    = byCategory['currency'];
-    const allCurrency = cats.flatMap(c => byCategory[c]);
+    if (CURRENCY_CATS.length) {
+      // категории пришли — значит живой API (через прокси) отвечает, тащим сами данные
+      // через публичный прокси нельзя слать всё разом — лимит 3 одновременных запроса
+      const results     = await mapLimit(cats, 3, cat => fetchCategory(cat));
+      const uniqResults  = await mapLimit(uniqCats, 3, cat => fetchUniqueCategory(cat));
+      cats.forEach((cat, i) => { byCategory[cat] = results[i]; });
+      uniqCats.forEach((cat, i) => {
+        (uniqResults[i] || []).forEach(u => {
+          if (!u || !(u.CurrentPrice > 0)) return;
+          u.CategoryApiId = u.CategoryApiId || cat;
+          allUniques.push(u);
+        });
+      });
+    }
+
+    let allCurrency = cats.flatMap(c => byCategory[c] || []);
+
+    if (!allCurrency.length) {
+      // живой API (или все прокси) недоступны целиком — пробуем локальный кэш data.json
+      const fb = await loadSnapshotData(REALM, LEAGUE);
+      if (fb) {
+        LEAGUE = fb.league;
+        localStorage.setItem('poe2_league_' + REALM, LEAGUE);
+        buildCategories(fb.snap.categoriesResp);
+        cats = fb.snap.cats?.length ? fb.snap.cats : ['currency'];
+        uniqCats = fb.snap.uniqCats || [];
+        byCategory = fb.snap.byCategory || {};
+        allUniques = (fb.snap.uniques || []).filter(u => u && u.CurrentPrice > 0);
+        allCurrency = cats.flatMap(c => byCategory[c] || []);
+        usingSnapshot = fb.snap.savedAt;
+      }
+    }
 
     if (!allCurrency.length) {
       document.getElementById('root').innerHTML = `<div class="error-msg">
         Не удалось загрузить данные с poe2scout.<br><br>
         API <b>api.poe2scout.com</b> работает, но не отдаёт CORS-заголовки, поэтому запросы из браузера
-        идут через публичные прокси — а они сейчас не ответили (лимит частоты или прокси лежит).<br><br>
+        идут через публичные прокси — а они сейчас не ответили (лимит частоты или прокси лежит).
+        Локальный кэш <code>data.json</code> тоже недоступен или пуст.<br><br>
         Сначала попробуй «↺ Обновить» через минуту. Если повторяется — подними свой прокси
         (Cloudflare Worker) и пропиши его один раз в консоли:<br>
         <code style="display:inline-block;margin-top:5px;font-size:11px">localStorage.setItem('poe2_proxy','https://твой-worker.workers.dev/?url=')</code>
@@ -1891,6 +1936,7 @@ async function loadAll() {
     }
 
     U_BASE = REALMS[REALM].baseSh; U_MID = REALMS[REALM].midSh; MID_API = REALMS[REALM].midApi;
+    const currency = byCategory['currency'] || [];
     const divItem = currency.find(c => c.ApiId === 'divine');
     if (divItem?.CurrentPrice > 0) divinePrice = divItem.CurrentPrice;
     // mid-валюта: chaos (poe2) / exalted (poe1). В базовой лиге сама base-валюта = 1.
@@ -1923,7 +1969,12 @@ async function loadAll() {
       }));
 
     const now = new Date().toLocaleTimeString('ru', { hour:'2-digit', minute:'2-digit' });
-    document.getElementById('updated').textContent = `Обновлено в ${now} · poe2scout.com · ${REALMS[REALM].game} · ${LEAGUE}`;
+    if (usingSnapshot) {
+      const sd = new Date(usingSnapshot).toLocaleString('ru', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
+      document.getElementById('updated').innerHTML = `⚠ живой API недоступен, показан кэш от ${sd} · ${REALMS[REALM].game} · ${LEAGUE}`;
+    } else {
+      document.getElementById('updated').textContent = `Обновлено в ${now} · poe2scout.com · ${REALMS[REALM].game} · ${LEAGUE}`;
+    }
 
     const runesItems     = byCategory['runes']     || [];
     const fragmentsItems = byCategory['fragments'] || [];
