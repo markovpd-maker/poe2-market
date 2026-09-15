@@ -459,15 +459,16 @@ function deleteProfile() {
 function rebaseToWorkUnit(byCategory, uniques, realmCfg) {
   if (realmCfg.baseApi === realmCfg.nativeApi) return; // уже в рабочей валюте, пересчёт не нужен
   const allCur = Object.values(byCategory).flat().filter(Boolean);
-  const baseItem = allCur.find(c => c.ApiId === realmCfg.baseApi);
+  const baseItem = allCur.find(c => c?.ApiId === realmCfg.baseApi);
   if (!(baseItem?.CurrentPrice > 0)) {
     console.warn('rebaseToWorkUnit: валюта', realmCfg.baseApi, 'не найдена в данных — пересчёт пропущен');
     return;
   }
   const factor = 1 / baseItem.CurrentPrice; // native → work (например exalted → chaos)
   const scale = it => {
+    if (!it) return;
     if (typeof it.CurrentPrice === 'number') it.CurrentPrice *= factor;
-    if (Array.isArray(it.PriceLogs)) it.PriceLogs.forEach(l => { if (typeof l.Price === 'number') l.Price *= factor; });
+    if (Array.isArray(it.PriceLogs)) it.PriceLogs.forEach(l => { if (l && typeof l.Price === 'number') l.Price *= factor; });
   };
   allCur.forEach(scale);
   (uniques || []).forEach(scale);
