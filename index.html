@@ -1659,17 +1659,29 @@ function drawPcxChart(it) {
 }
 
 /* ── Data layer ──
-   Реалм в пути: poe2scout.com/api/{REALM}/Leagues/{league}/...
+   Реалм в пути: api.poe2scout.com/{REALM}/Leagues/{league}/...
    REALM='poe2' (Exalted-база) или 'pc' = PoE1 PC (Chaos-база).
    poe2 — можно через MCP (window.cowork); pc — только публичный API (MCP знает лишь poe2). */
-function apiBase() { return 'https://api.poe2scout.com/' + REALM + '/Leagues/' + encodeURIComponent(LEAGUE); }
+const API_ROOT = 'https://api.poe2scout.com';
+function apiBase() { return API_ROOT + '/' + REALM + '/Leagues/' + encodeURIComponent(LEAGUE); }
 
+/* Список лиг: точный путь у нового API менялся — пробуем кандидатов по очереди.
+   Если ни один не ответил, работаем на сохранённой лиге (селектор просто не заполнится). */
 async function fetchLeagues(realm) {
   if (leaguesCache[realm]) return leaguesCache[realm];
-  const d = await fetchJsonCors('https://api.poe2scout.com/' + realm + '/Leagues');
-  const arr = Array.isArray(d) ? d : [];
-  if (arr.length) leaguesCache[realm] = arr;
-  return arr;
+  const candidates = [
+    API_ROOT + '/' + realm + '/Leagues',
+    API_ROOT + '/' + realm + '/leagues',
+    API_ROOT + '/leagues?realm=' + realm,
+    API_ROOT + '/Leagues?realm=' + realm,
+  ];
+  for (const u of candidates) {
+    const d = await fetchJsonCors(u);
+    const arr = Array.isArray(d) ? d : (Array.isArray(d?.Leagues) ? d.Leagues : (Array.isArray(d?.Items) ? d.Items : []));
+    if (arr.length) { leaguesCache[realm] = arr; return arr; }
+  }
+  console.warn('leagues list unavailable, using stored league:', LEAGUE);
+  return [];
 }
 
 async function fetchCategoriesResp() {
@@ -1708,34 +1720,68 @@ async function fetchUniqueCategory(cat) {
   return Array.isArray(d?.Items) ? d.Items : [];
 }
 
-// Браузер с чужого домена может упереться в CORS — пробуем напрямую, затем через прокси.
-// corsproxy.io официально бесплатен для github.io; allorigins — запасной.
+/* ── CORS ──
+   api.poe2scout.com НЕ отдаёт Access-Control-Allow-Origin, поэтому напрямую из браузера
+   с github.io данные получить нельзя — обязателен прокси.
+   corsproxy.io с 2026 требует ключ (401), allorigins нестабилен, поэтому цепочка из нескольких.
+
+   Свой прокси (надёжнее всего, Cloudflare Worker) задаётся один раз в консоли:
+     localStorage.setItem('poe2_proxy', 'https://твой-worker.workers.dev/?url=')
+   Он будет использоваться первым. */
+const USER_PROXY = localStorage.getItem('poe2_proxy') || '';
+
+function proxyChain(url) {
+  const enc = encodeURIComponent(url);
+  const list = [];
+  if (USER_PROXY) list.push(USER_PROXY.includes('=') ? USER_PROXY + enc : USER_PROXY + '?url=' + enc);
+  list.push('https://api.codetabs.com/v1/proxy?quest=' + enc);
+  list.push('https://api.allorigins.win/raw?url=' + enc);
+  list.push('https://api.allorigins.win/get?url=' + enc);   // обёртка {contents:"..."}
+  list.push(url);                                           // напрямую — вдруг вернут CORS
+  return list;
+}
+
 async function fetchWithTimeout(u, ms) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), ms);
   try { return await fetch(u, { signal: ctrl.signal, cache: 'no-store' }); }
   finally { clearTimeout(t); }
 }
-async function fetchJsonCors(url) {
-  const attempts = [
-    url,
-    'https://corsproxy.io/?url=' + encodeURIComponent(url),
-    'https://api.allorigins.win/raw?url=' + encodeURIComponent(url),
-  ];
-  for (const u of attempts) {
-    try {
-      const r = await fetchWithTimeout(u, 12000);
-      if (!r.ok) continue;
-      const d = await r.json();
-      if (d) return d;
-    } catch (e) { console.warn('fetch fail:', u.slice(0, 60), e.message); }
+
+// Бесплатные прокси режут частоту — не долбим один и тот же мгновенно
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+const jsonCache = new Map();
+async function fetchJsonCors(url, { retries = 1 } = {}) {
+  if (jsonCache.has(url)) return jsonCache.get(url);
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    for (const u of proxyChain(url)) {
+      try {
+        const r = await fetchWithTimeout(u, 20000);
+        if (!r.ok) {
+          if (r.status === 429) await sleep(1500);   // rate limit прокси
+          continue;
+        }
+        const txt = await r.text();
+        if (!txt || txt[0] === '<') continue;        // прилетел HTML вместо JSON
+        let d = JSON.parse(txt);
+        if (d && typeof d.contents === 'string') d = JSON.parse(d.contents); // allorigins/get
+        if (d) { jsonCache.set(url, d); return d; }
+      } catch (e) { console.warn('fetch fail:', u.slice(0, 70), e.message); }
+    }
+    if (attempt < retries) await sleep(1200);
   }
-  // allorigins /get оборачивает ответ в {contents:"..."}
-  try {
-    const r = await fetchWithTimeout('https://api.allorigins.win/get?url=' + encodeURIComponent(url), 15000);
-    if (r.ok) { const w = await r.json(); if (w?.contents) return JSON.parse(w.contents); }
-  } catch (e) { console.warn('allorigins/get fail:', e.message); }
   return null;
+}
+
+// Параллелим запросы, но не больше n одновременно — иначе прокси отдаёт 429
+async function mapLimit(arr, n, fn) {
+  const out = new Array(arr.length);
+  let i = 0;
+  await Promise.all(Array.from({ length: Math.min(n, arr.length) }, async () => {
+    while (i < arr.length) { const k = i++; out[k] = await fn(arr[k], k); }
+  }));
+  return out;
 }
 
 /* ── JS-пароль для standalone-версии (в Cowork не запрашивается).
@@ -1812,10 +1858,9 @@ async function loadAll() {
 
     const cats = CURRENCY_CATS.length ? CURRENCY_CATS : ['currency'];
     const uniqCats = Object.keys(UNIQUE_CATS);
-    const [results, uniqResults] = await Promise.all([
-      Promise.all(cats.map(cat => fetchCategory(cat))),
-      Promise.all(uniqCats.map(cat => fetchUniqueCategory(cat))),
-    ]);
+    // через публичный прокси нельзя слать всё разом — лимит 3 одновременных запроса
+    const results     = await mapLimit(cats, 3, cat => fetchCategory(cat));
+    const uniqResults = await mapLimit(uniqCats, 3, cat => fetchUniqueCategory(cat));
 
     const byCategory = {};
     cats.forEach((cat, i) => { byCategory[cat] = results[i]; });
@@ -1835,9 +1880,13 @@ async function loadAll() {
 
     if (!allCurrency.length) {
       document.getElementById('root').innerHTML = `<div class="error-msg">
-        Не удалось загрузить данные с poe2scout.<br>
-        Возможные причины: API недоступен, либо CORS-прокси (corsproxy.io / allorigins.win) не отвечают.
-        Попробуй «↺ Обновить» через минуту.</div>`;
+        Не удалось загрузить данные с poe2scout.<br><br>
+        API <b>api.poe2scout.com</b> работает, но не отдаёт CORS-заголовки, поэтому запросы из браузера
+        идут через публичные прокси — а они сейчас не ответили (лимит частоты или прокси лежит).<br><br>
+        Сначала попробуй «↺ Обновить» через минуту. Если повторяется — подними свой прокси
+        (Cloudflare Worker) и пропиши его один раз в консоли:<br>
+        <code style="display:inline-block;margin-top:5px;font-size:11px">localStorage.setItem('poe2_proxy','https://твой-worker.workers.dev/?url=')</code>
+        </div>`;
       return;
     }
 
