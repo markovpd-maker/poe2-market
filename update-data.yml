@@ -1,0 +1,39 @@
+name: Update market data.json
+
+on:
+  schedule:
+    # каждый час в 7 минут — не в ровный час, чтобы не попадать в пиковую нагрузку раннеров GitHub
+    - cron: '7 * * * *'
+  workflow_dispatch: {}   # кнопка "Run workflow" вручную, для проверки без ожидания
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-data
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Снять свежие данные с poe2scout
+        run: node scripts/fetch-snapshot.mjs
+
+      - name: Закоммитить data.json, если что-то изменилось
+        run: |
+          git config user.name "poe2-market-bot"
+          git config user.email "actions@users.noreply.github.com"
+          if git diff --quiet -- data.json; then
+            echo "data.json не изменился, коммит не нужен."
+          else
+            git add data.json
+            git commit -m "chore: обновление рыночных данных ($(date -u +'%Y-%m-%d %H:%M UTC'))"
+            git push
+          fi
