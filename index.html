@@ -1896,7 +1896,8 @@ function onLeagueChange(v) {
    Если не удалось ни то ни другое — показываем ошибку. Если удался хотя бы кэш — экран
    остаётся рабочим, даже если живой шаг упал (ошибка живого шага просто уходит в консоль). */
 async function loadAll() {
-  const cached = await loadSnapshotData(REALM, LEAGUE);
+  const requestedLeague = LEAGUE; // то, что выбрал пользователь / что сохранено — кэш не должен это перетирать
+  const cached = await loadSnapshotData(REALM, requestedLeague);
   let shown = false;
   if (cached) {
     try {
@@ -1910,6 +1911,10 @@ async function loadAll() {
       shown = true;
     } catch (e) { console.warn('loadAll: кэш не отрисовался:', e.message); }
   }
+  // renderMarket выше мог временно выставить LEAGUE = cached.league (лига из кэша, если она
+  // отличается от выбранной — например кэш ещё не обновился под новую лигу). Возвращаем
+  // выбор пользователя, иначе следующий шаг (живые данные) молча уедет в лигу из кэша.
+  LEAGUE = requestedLeague;
 
   try {
     const leagues = await fetchLeagues(REALM);
