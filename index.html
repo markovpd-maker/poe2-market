@@ -1861,7 +1861,10 @@ function fillGameLeagueSel(leagues) {
   if (gs) gs.innerHTML = Object.keys(REALMS).map(r =>
     `<option value="${r}" ${r===REALM?'selected':''}>${REALMS[r].emoji} ${REALMS[r].game}</option>`).join('');
   const ls = document.getElementById('league-sel');
-  if (ls) ls.innerHTML = (leagues||[]).slice().sort((a,b)=>(a.IsCurrent?0:1)-(b.IsCurrent?0:1))
+  // без живого списка лиг (кэш-режим, API недоступен) хотя бы показываем текущую выбранную —
+  // иначе селектор остаётся пустым и выглядит как «выбор пропал»
+  const list = (leagues && leagues.length) ? leagues : (LEAGUE ? [{ Value: LEAGUE, IsCurrent: true }] : []);
+  if (ls) ls.innerHTML = list.slice().sort((a,b)=>(a.IsCurrent?0:1)-(b.IsCurrent?0:1))
     .map(l => `<option value="${(l.Value||'').replace(/"/g,'&quot;')}" ${l.Value===LEAGUE?'selected':''}>${l.IsCurrent?'🟢 ':''}${l.Value}</option>`).join('');
 }
 async function onGameChange(realm) {
@@ -1901,6 +1904,8 @@ async function loadAll() {
   let shown = false;
   if (cached) {
     try {
+      LEAGUE = cached.league; // временно — чтобы selectbox ниже подсветил правильный option
+      fillGameLeagueSel([]);  // мгновенно: хотя бы игра + текущая (кэшная) лига, без сети
       renderMarket(
         cached.snap.cats?.length ? cached.snap.cats : ['currency'],
         cached.snap.uniqCats || [],
