@@ -1873,15 +1873,16 @@ async function onGameChange(realm) {
   localStorage.setItem('poe2_realm', REALM);
   U_BASE = REALMS[REALM].baseSh; U_MID = REALMS[REALM].midSh; MID_API = REALMS[REALM].midApi;
   LEAGUE = localStorage.getItem('poe2_league_' + REALM) || '';
-  const leagues = await fetchLeagues(REALM);
-  if (!leagues.some(l => l.Value === LEAGUE)) {
-    const cur = leagues.find(l => l.IsCurrent && !/^HC /i.test(l.Value)) || leagues.find(l => l.IsCurrent) || leagues[0];
-    LEAGUE = cur ? cur.Value : LEAGUE;
+  if (!LEAGUE) {
+    // лиги для этого реалма ещё не выбирали — не ждём живой API (он может быть недоступен
+    // без VPN), а сразу берём то, что лежит в локальном кэше data.json для этого реалма
+    const c = await loadSnapshotData(realm, '');
+    LEAGUE = c ? c.league : '';
   }
   localStorage.setItem('poe2_league_' + REALM, LEAGUE);
   flipCat = 'all'; investCat = 'all';            // наборы категорий у игр разные
   pcxCurrent = null;
-  loadAll();
+  loadAll(); // сам покажет кэш мгновенно, а живые данные (и полный список лиг) — поверх
 }
 function onLeagueChange(v) {
   if (!v || v === LEAGUE) return;
@@ -1923,6 +1924,11 @@ async function loadAll() {
 
   try {
     const leagues = await fetchLeagues(REALM);
+    // если выбранной лиги нет среди живых (сменилась/название другое) — берём текущую
+    if (leagues.length && !leagues.some(l => l.Value === LEAGUE)) {
+      const cur = leagues.find(l => l.IsCurrent && !/^HC /i.test(l.Value)) || leagues.find(l => l.IsCurrent) || leagues[0];
+      if (cur) { LEAGUE = cur.Value; localStorage.setItem('poe2_league_' + REALM, LEAGUE); }
+    }
     fillGameLeagueSel(leagues);
     const categoriesResp = await fetchCategoriesResp();
     buildCategories(categoriesResp); // временно — узнать CURRENCY_CATS/UNIQUE_CATS для живого фетча
