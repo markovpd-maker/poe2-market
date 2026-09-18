@@ -524,16 +524,16 @@ function calcFlipScore(logs, curEx) {
   return volatility * liquidity * liqFactor * (0.5 + entryQuality * 0.5) * 100;
 }
 
-// ── INVEST model: окно 7 дней, тренд × консистентность × ликвидность ──
+// ── INVEST model: окно 3 дня, тренд × консистентность × ликвидность ──
 function calcInvestScore(logs) {
-  const sl = recentLogs(logs, 7);
+  const sl = recentLogs(logs, 3);
   if (sl.length < 3) return 0;
   const prices = sl.map(l => l.Price);
   const newest = prices[0], oldest = prices[prices.length-1];
   if (oldest <= 0) return 0;
   const trend = (newest - oldest) / oldest;
   if (trend <= 0) return 0;
-  const aq = avgQty(logs, 7);
+  const aq = avgQty(logs, 3);
   if (aq < 20) return 0;
   const liqFactor = Math.min(1, aq / 50);
   let upSteps = 0;
@@ -586,7 +586,7 @@ function getFlipBids(logs, curEx) {
 
 // Invest: target = cur + дневной прирост ×3, cap +50% (линейная экстраполяция врёт на параболах)
 function getInvestBids(logs, curEx) {
-  const sl = recentLogs(logs, 7);
+  const sl = recentLogs(logs, 3);
   if (sl.length < 2 || !curEx) return null;
   const prices = sl.map(l => l.Price);
   const dailyGain = (prices[0] - prices[prices.length-1]) / (prices.length - 1);
@@ -605,7 +605,7 @@ function unitsCanBuy(buyEx) {
 function marginCls(m) {
   return m >= 15 ? 'margin-good' : m >= 7 ? 'margin-ok' : 'margin-low';
 }
-const MIN_FLIP_MARGIN = 5; // %
+const MIN_FLIP_MARGIN = 10; // %
 function passesFlipMargin(it) {
   const b = getFlipBids(it.PriceLogs, it.CurrentPrice);
   return b && b.margin >= MIN_FLIP_MARGIN;
@@ -677,10 +677,10 @@ function renderInvestTable(items) {
 
   if (!filtered.length) return '<div class="no-data">Нет растущих предметов в этой категории</div>';
   const showUnits = bEx > 0;
-  const hdr = `<tr><th>#</th><th>Предмет</th><th>Цена</th><th>Купить по</th><th>Цель +3д</th><th>Потенц.</th><th>7д тренд</th>${showUnits?'<th>Кол-во</th>':''}</tr>`;
+  const hdr = `<tr><th>#</th><th>Предмет</th><th>Цена</th><th>Купить по</th><th>Цель +3д</th><th>Потенц.</th><th>3д тренд</th>${showUnits?'<th>Кол-во</th>':''}</tr>`;
   const rows = filtered.map((it,i) => {
     const bids  = getInvestBids(it.PriceLogs, it.CurrentPrice);
-    const t7    = trendPct(it.PriceLogs, 7);
+    const t7    = trendPct(it.PriceLogs, 3);
     const units = bids && showUnits ? unitsCanBuy(bids.buyEx) : null;
     const buyTxt  = bids ? fmtD(bids.buyEx)    : '—';
     const targTxt = bids ? fmtD(bids.targetEx) : '—';
@@ -1241,47 +1241,44 @@ function findMarketItem(nameCands) {
   return null;
 }
 
-/* Рекомендация продать/держать. Сигналы и веса:
-   1) 7д тренд: >+50% перегрев (−1), +15..50 рост (+1), <−15% падение (−2: дальше дешевле)
-   2) разворот: 7д рос, а 3д уже минус (−2: рост выдохся); 3д ≥ половины 7д (+1: импульс жив)
-   3) 24ч: просадка >3% после сильного роста (−2: окно фиксации); +3% (+1)
-   4) позиция в 7д диапазоне: у максимума (−1: выгодно продать), у дна без падения (+1: продавать невыгодно)
-   5) предложение: −40% объёма за неделю (+1: дефицит), +60% (−1: давление)
-   6) ликвидность <20/день — предупреждение без очков
+/* Рекомендация продать/держать. Сигналы и веса (окно оценки — 3 дня):
+   1) 3д тренд: >+35% перегрев (−1), +10..35 рост (+1), <−10% падение (−2: дальше дешевле)
+   2) 24ч: просадка >3% после сильного роста (−2: окно фиксации; это и есть сигнал разворота
+      при коротком окне — раньше сравнивали 7д с 3д, но с одинаковыми окнами это лишено смысла); +3% (+1)
+   3) позиция в 3д диапазоне: у максимума (−1: выгодно продать), у дна без падения (+1: продавать невыгодно)
+   4) предложение: −40% объёма за 3д (+1: дефицит), +60% (−1: давление)
+   5) ликвидность <20/день — предупреждение без очков
    Σ: ≤−3 продавать сейчас, −1..−2 скорее продавать, 0 нейтрально, 1..2 скорее держать, ≥3 держать */
 function adviseItem(it) {
   const logs = safeLogs(it.PriceLogs);
   const cur = it.CurrentPrice;
-  const t3 = trendPct(logs, 3), t7 = trendPct(logs, 7);
+  const t3 = trendPct(logs, 3);
   const yest = logs.length >= 2 ? logs[1].Price : null;
   const day = yest ? (cur - yest) / yest * 100 : null;
-  const qNew = logs[0]?.Quantity || 0, qOld = logs[logs.length-1]?.Quantity || 0;
+  const win = recentLogs(logs, 3);
+  const qNew = win[0]?.Quantity || 0, qOld = win[win.length-1]?.Quantity || 0;
   const supply = qOld > 0 ? (qNew - qOld) / qOld * 100 : null;
   const aq = avgQty(logs, 3);
-  const prices = logs.map(l => l.Price);
-  const hi7 = Math.max(...prices, cur), lo7 = Math.min(...prices, cur);
-  const pos = hi7 > lo7 ? (cur - lo7) / (hi7 - lo7) : 0.5;
+  const prices = win.map(l => l.Price);
+  const hi3 = Math.max(...prices, cur), lo3 = Math.min(...prices, cur);
+  const pos = hi3 > lo3 ? (cur - lo3) / (hi3 - lo3) : 0.5;
 
   let score = 0;
   const reasons = [];
-  if (t7 !== null) {
-    if (t7 > 50)       { score -= 1; reasons.push(`📈 +${t7.toFixed(0)}% за 7д — цена перегрета, растёт риск отката`); }
-    else if (t7 > 15)  { score += 1; reasons.push(`📈 устойчивый рост +${t7.toFixed(0)}% за 7д`); }
-    else if (t7 < -15) { score -= 2; reasons.push(`📉 ${t7.toFixed(0)}% за 7д — нисходящий тренд, дальше скорее дешевле`); }
-    else reasons.push(`↔ 7д тренд слабый (${t7 >= 0 ? '+' : ''}${t7.toFixed(0)}%)`);
-  }
-  if (t7 !== null && t3 !== null && t7 > 15) {
-    if (t3 < 0)           { score -= 2; reasons.push(`🔄 рост выдохся: 3д тренд уже ${t3.toFixed(0)}% — начался откат`); }
-    else if (t3 > t7 / 2) { score += 1; reasons.push(`🔥 импульс сохраняется (3д: +${t3.toFixed(0)}%)`); }
+  if (t3 !== null) {
+    if (t3 > 35)       { score -= 1; reasons.push(`📈 +${t3.toFixed(0)}% за 3д — цена перегрета, растёт риск отката`); }
+    else if (t3 > 10)  { score += 1; reasons.push(`📈 устойчивый рост +${t3.toFixed(0)}% за 3д`); }
+    else if (t3 < -10) { score -= 2; reasons.push(`📉 ${t3.toFixed(0)}% за 3д — нисходящий тренд, дальше скорее дешевле`); }
+    else reasons.push(`↔ 3д тренд слабый (${t3 >= 0 ? '+' : ''}${t3.toFixed(0)}%)`);
   }
   if (day !== null) {
-    if (day < -3 && (t7 ?? 0) > 30) { score -= 2; reasons.push(`⏰ ${day.toFixed(1)}% за 24ч после сильного роста — окно фиксации прибыли`); }
+    if (day < -3 && (t3 ?? 0) > 20) { score -= 2; reasons.push(`⏰ ${day.toFixed(1)}% за 24ч после сильного роста — окно фиксации прибыли`); }
     else if (day > 3)               { score += 1; reasons.push(`▲ +${day.toFixed(1)}% за 24ч`); }
   }
-  if (pos > 0.9)                          { score -= 1; reasons.push(`🎯 цена у максимума 7д диапазона — выгодная точка продажи`); }
+  if (pos > 0.9)                          { score -= 1; reasons.push(`🎯 цена у максимума 3д диапазона — выгодная точка продажи`); }
   else if (pos < 0.2 && (t3 ?? 0) >= 0)   { score += 1; reasons.push(`🛟 цена у дна диапазона и не падает — продавать сейчас невыгодно`); }
   if (supply !== null) {
-    if (supply < -40)     { score += 1; reasons.push(`📦 предложение упало на ${Math.abs(supply).toFixed(0)}% за неделю — дефицит поддерживает цену`); }
+    if (supply < -40)     { score += 1; reasons.push(`📦 предложение упало на ${Math.abs(supply).toFixed(0)}% за 3д — дефицит поддерживает цену`); }
     else if (supply > 60) { score -= 1; reasons.push(`📦 предложение выросло на ${supply.toFixed(0)}% — давление на цену`); }
   }
   if (aq < 20) reasons.push(`🐌 низкая ликвидность (~${aq.toFixed(0)} сделок/день) — продажа может занять время`);
@@ -1346,7 +1343,7 @@ function pcEvaluate() {
       <div class="pc-price-box"><div class="lbl">стак (${qty} шт)</div><div class="val">${stack.toFixed(0)} ${U_BASE}</div><div class="bid-sub">${toDiv(stack).toFixed(2)} div · ${toC(stack).toFixed(0)} ${U_MID}</div></div>
     </div>
     ${a.reasons.map(r => `<div class="pc-reason">${r}</div>`).join('')}
-    <div class="pc-reason" style="color:#aaa;margin-top:4px">Оценка по 7-дневной динамике poe2scout; патчи, анонсы и конец лиги не учитываются.</div>
+    <div class="pc-reason" style="color:#aaa;margin-top:4px">Оценка по 3-дневной динамике poe2scout; патчи, анонсы и конец лиги не учитываются.</div>
     <div class="pc-reason" style="color:#2e7d32;margin-top:6px;font-weight:600">✓ автоматически добавлено в Stash ниже</div>
     <button class="tr-btn" style="margin-top:6px" onclick="stashAdd()">↻ Обновить кол-во в Stash</button>
   </div>`;
@@ -1432,7 +1429,7 @@ function renderStash() {
     const hoverTitle = a ? a.reasons.join('&#10;') : 'нет данных по предмету';
     const detailRow = expanded && a ? `<tr><td colspan="7" style="background:#faf8ff;padding:8px 16px">
         ${a.reasons.map(r => `<div class="pc-reason">${r}</div>`).join('')}
-        <div class="pc-reason" style="color:#aaa">Оценка по 7-дневной динамике poe2scout.</div>
+        <div class="pc-reason" style="color:#aaa">Оценка по 3-дневной динамике poe2scout.</div>
       </td></tr>` : '';
     return `<tr>
       <td class="sort" onclick="stashToggle(${x.id})" title="${hoverTitle}">
@@ -1471,7 +1468,7 @@ function renderStash() {
    Цена уникалов в exalted, как у валюты. Ликвидность критична: у многих
    junk-уникалов 1–3 листинга и тролльные цены, поэтому показываем объём явно. */
 function uniqLiquidity(it) {
-  const aq = avgQty(it.PriceLogs, 7) || it.CurrentQuantity || 0;
+  const aq = avgQty(it.PriceLogs, 3) || it.CurrentQuantity || 0;
   if (aq >= 20) return { aq, label: `${aq.toFixed(0)}/д`, cls: 'liq-hi' };
   if (aq >= 5)  return { aq, label: `${aq.toFixed(0)}/д`, cls: 'liq-md' };
   return { aq, label: `${aq.toFixed(0)}/д`, cls: 'liq-lo' };
@@ -1493,10 +1490,10 @@ function renderUniqTable() {
     .sort((a,b) => b.CurrentPrice - a.CurrentPrice)
     .slice(0, 20);
   if (!items.length) return '<div class="no-data">Нет данных по уникалам в этой категории</div>';
-  const hdr = `<tr><th>#</th><th>Предмет</th><th>Цена (div)</th><th>${U_BASE} · ${U_MID}</th><th>Ликвидность</th><th>7д тренд</th><th></th></tr>`;
+  const hdr = `<tr><th>#</th><th>Предмет</th><th>Цена (div)</th><th>${U_BASE} · ${U_MID}</th><th>Ликвидность</th><th>3д тренд</th><th></th></tr>`;
   const rows = items.map((it, i) => {
     const liq = uniqLiquidity(it);
-    const t7 = trendPct(it.PriceLogs, 7);
+    const t7 = trendPct(it.PriceLogs, 3);
     const base = it.ItemMetadata?.base_type || it.Type || '';
     const nm = (it.Name || it.Text || '').replace(/'/g, "\\'");
     return `<tr>
@@ -1636,7 +1633,7 @@ function renderPcx(it) {
         <div class="pcx-info-card">
           <div class="pcx-section-h">Аналитика и рекомендация</div>
           ${a.reasons.map(r => `<div class="pc-reason">${r}</div>`).join('') || '<div class="pc-reason" style="color:#aaa">Недостаточно истории для сигналов.</div>'}
-          <div class="pc-reason" style="color:#aaa;margin-top:5px">Оценка по 7-дневной динамике poe2scout; патчи, анонсы и конец лиги не учитываются.</div>
+          <div class="pc-reason" style="color:#aaa;margin-top:5px">Оценка по 3-дневной динамике poe2scout; патчи, анонсы и конец лиги не учитываются.</div>
         </div>
         ${pcxDescribe(it)}
       </div>
@@ -1890,123 +1887,136 @@ function onLeagueChange(v) {
   loadAll();
 }
 
-/* ── Main (v3) ── */
+/* ── loadAll ──
+   1) Сразу рисуем то, что есть в data.json — это тот же домен (github.io), без единого
+      внешнего запроса, поэтому работает даже там, где api.poe2scout.com и Cloudflare-воркер
+      недоступны без VPN (актуально для РФ).
+   2) Пробуем живые данные поверх — если получилось, тихо перерисовываем экран актуальными
+      числами (кэш при этом молча заменяется, баннер «показан кэш» пропадает).
+   Если не удалось ни то ни другое — показываем ошибку. Если удался хотя бы кэш — экран
+   остаётся рабочим, даже если живой шаг упал (ошибка живого шага просто уходит в консоль). */
 async function loadAll() {
-  document.getElementById('root').innerHTML = `<div class="loading"><div class="spinner"></div><br>Загружаем данные с poe2scout…</div>`;
-  document.getElementById('updated').textContent = 'Загружается...';
-  const rlReset = document.getElementById('rate-label'); if (rlReset) rlReset.textContent = '…';
+  const cached = await loadSnapshotData(REALM, LEAGUE);
+  let shown = false;
+  if (cached) {
+    try {
+      renderMarket(
+        cached.snap.cats?.length ? cached.snap.cats : ['currency'],
+        cached.snap.uniqCats || [],
+        cached.snap.byCategory || {},
+        (cached.snap.uniques || []).filter(u => u && u.CurrentPrice > 0),
+        cached.league, cached.snap.categoriesResp, cached.snap.savedAt,
+      );
+      shown = true;
+    } catch (e) { console.warn('loadAll: кэш не отрисовался:', e.message); }
+  }
 
   try {
-    // лиги реалма → селекторы игры/лиги; если выбранная лига пропала, берём текущую (не HC)
     const leagues = await fetchLeagues(REALM);
-    if (leagues.length && !leagues.some(l => l.Value === LEAGUE)) {
-      const cur = leagues.find(l => l.IsCurrent && !/^HC /i.test(l.Value)) || leagues.find(l => l.IsCurrent) || leagues[0];
-      if (cur) { LEAGUE = cur.Value; localStorage.setItem('poe2_league_' + REALM, LEAGUE); }
-    }
     fillGameLeagueSel(leagues);
-    // категории реалма (валюта + уникалы) — динамически
-    buildCategories(await fetchCategoriesResp());
+    const categoriesResp = await fetchCategoriesResp();
+    buildCategories(categoriesResp); // временно — узнать CURRENCY_CATS/UNIQUE_CATS для живого фетча
+    const cats = CURRENCY_CATS.length ? CURRENCY_CATS : [];
+    const uniqCats = Object.keys(UNIQUE_CATS);
+    if (!cats.length) throw new Error('категории не пришли');
 
-    let cats = CURRENCY_CATS.length ? CURRENCY_CATS : ['currency'];
-    let uniqCats = Object.keys(UNIQUE_CATS);
-    let byCategory = {};
-    allUniques = [];
-    usingSnapshot = null;
-
-    if (CURRENCY_CATS.length) {
-      // категории пришли — значит живой API (через прокси) отвечает, тащим сами данные
-      // через публичный прокси нельзя слать всё разом — лимит 3 одновременных запроса
-      const results     = await mapLimit(cats, 3, cat => fetchCategory(cat));
-      const uniqResults  = await mapLimit(uniqCats, 3, cat => fetchUniqueCategory(cat));
-      cats.forEach((cat, i) => { byCategory[cat] = results[i]; });
-      uniqCats.forEach((cat, i) => {
-        (uniqResults[i] || []).forEach(u => {
-          if (!u || !(u.CurrentPrice > 0)) return;
-          u.CategoryApiId = u.CategoryApiId || cat;
-          allUniques.push(u);
-        });
+    // через публичный прокси нельзя слать всё разом — лимит 3 одновременных запроса
+    const results     = await mapLimit(cats, 3, cat => fetchCategory(cat));
+    const uniqResults  = await mapLimit(uniqCats, 3, cat => fetchUniqueCategory(cat));
+    const byCategory = {};
+    cats.forEach((cat, i) => { byCategory[cat] = results[i]; });
+    const liveUniques = [];
+    uniqCats.forEach((cat, i) => {
+      (uniqResults[i] || []).forEach(u => {
+        if (!u || !(u.CurrentPrice > 0)) return;
+        u.CategoryApiId = u.CategoryApiId || cat;
+        liveUniques.push(u);
       });
-    }
+    });
 
-    let allCurrency = cats.flatMap(c => byCategory[c] || []);
+    const allCurrency = cats.flatMap(c => byCategory[c] || []);
+    if (!allCurrency.length) throw new Error('живые цены пустые');
 
-    if (!allCurrency.length) {
-      // живой API (или все прокси) недоступны целиком — пробуем локальный кэш data.json
-      const fb = await loadSnapshotData(REALM, LEAGUE);
-      if (fb) {
-        LEAGUE = fb.league;
-        localStorage.setItem('poe2_league_' + REALM, LEAGUE);
-        buildCategories(fb.snap.categoriesResp);
-        cats = fb.snap.cats?.length ? fb.snap.cats : ['currency'];
-        uniqCats = fb.snap.uniqCats || [];
-        byCategory = fb.snap.byCategory || {};
-        allUniques = (fb.snap.uniques || []).filter(u => u && u.CurrentPrice > 0);
-        allCurrency = cats.flatMap(c => byCategory[c] || []);
-        usingSnapshot = fb.snap.savedAt;
-      }
-    }
+    renderMarket(cats, uniqCats, byCategory, liveUniques, LEAGUE, categoriesResp, null);
+    shown = true;
+  } catch (e) {
+    console.warn('loadAll: живые данные недоступны' + (shown ? ' — оставляю кэш на экране' : '') + ':', e.message);
+  }
 
-    if (!allCurrency.length) {
-      document.getElementById('root').innerHTML = `<div class="error-msg">
-        Не удалось загрузить данные с poe2scout.<br><br>
-        API <b>api.poe2scout.com</b> работает, но не отдаёт CORS-заголовки, поэтому запросы из браузера
-        идут через публичные прокси — а они сейчас не ответили (лимит частоты или прокси лежит).
-        Локальный кэш <code>data.json</code> тоже недоступен или пуст.<br><br>
-        Сначала попробуй «↺ Обновить» через минуту. Если повторяется — подними свой прокси
-        (Cloudflare Worker) и пропиши его один раз в консоли:<br>
-        <code style="display:inline-block;margin-top:5px;font-size:11px">localStorage.setItem('poe2_proxy','https://твой-worker.workers.dev/?url=')</code>
-        </div>`;
-      return;
-    }
+  if (!shown) {
+    document.getElementById('root').innerHTML = `<div class="error-msg">
+      Не удалось загрузить данные с poe2scout — ни живьём, ни из локального кэша data.json
+      (он либо ещё не создан GitHub Action'ом, либо пуст).<br><br>
+      Попробуй «↺ Обновить» через минуту. Если живые данные нужны прямо сейчас, а не из
+      часового кэша — подключи свой прокси в консоли:<br>
+      <code style="display:inline-block;margin-top:5px;font-size:11px">localStorage.setItem('poe2_proxy','https://твой-worker.workers.dev/?url=')</code>
+      </div>`;
+  }
+}
 
-    U_BASE = REALMS[REALM].baseSh; U_MID = REALMS[REALM].midSh; MID_API = REALMS[REALM].midApi;
-    // API отдаёт цены в nativeApi реалма — если рабочая валюта другая (poe2: chaos), пересчитываем один раз
-    rebaseToWorkUnit(byCategory, allUniques, REALMS[REALM]);
-    const currency = byCategory['currency'] || [];
-    const divItem = currency.find(c => c.ApiId === 'divine');
-    if (divItem?.CurrentPrice > 0) divinePrice = divItem.CurrentPrice;
-    // mid-валюта: chaos (poe2) / exalted (poe1). В базовой лиге сама base-валюта = 1.
-    const midItem = currency.find(c => c.ApiId === MID_API);
-    chaosPrice = (midItem && midItem.CurrentPrice > 0) ? midItem.CurrentPrice : 1;
-    const ub = document.getElementById('u-base'); if (ub) ub.textContent = U_BASE;
-    const um = document.getElementById('u-mid');  if (um) um.textContent = U_MID;
-    const rlEl = document.getElementById('rate-label');
-    if (rlEl) rlEl.innerHTML = `1 div = <span class="divine-rate">${divinePrice.toFixed(divinePrice<10?2:1)}</span> ${U_BASE} · 1 ${U_MID} = <span class="divine-rate">${chaosPrice.toFixed(chaosPrice<10?2:1)}</span> ${U_BASE}`;
-    const brandEl = document.getElementById('brand');
-    if (brandEl) brandEl.innerHTML = `${REALMS[REALM].emoji} ${REALMS[REALM].game} · <span id="brand-league">${LEAGUE}</span>`;
+/* ── Main (v3) ── */
+/* ── renderMarket ──
+   Вся отрисовка вкладки «Торговая площадка» + подготовка данных (пересчёт валюты,
+   курсы, каталог для автоподстановки). Вызывается два раза за один loadAll():
+   сначала с кэшем из data.json (мгновенно, без внешних доменов), потом — если
+   получится — с живыми данными поверх (молча заменяет экран). */
+function renderMarket(cats, uniqCats, byCategory, uniquesIn, league, categoriesResp, savedAt) {
+  try {
+  buildCategories(categoriesResp);
+  LEAGUE = league;
+  allUniques = uniquesIn;
+  usingSnapshot = savedAt;
 
-    // каталог всех предметов для автоподстановки, рыночных цен трекера и Price Check
-    marketByText = {};
-    allCurrency.forEach(it => { if (it.Text) marketByText[it.Text] = it; });
-    // уникалы тоже в каталог (Price Check, журнал, стеш) — валюта приоритетнее при коллизии имён
-    allUniques.forEach(it => { if (it.Text && !marketByText[it.Text]) marketByText[it.Text] = it; });
+  U_BASE = REALMS[REALM].baseSh; U_MID = REALMS[REALM].midSh; MID_API = REALMS[REALM].midApi;
+  // API отдаёт цены в nativeApi реалма — если рабочая валюта другая (poe2: chaos), пересчитываем один раз
+  rebaseToWorkUnit(byCategory, allUniques, REALMS[REALM]);
+  const currency = byCategory['currency'] || [];
+  const divItem = currency.find(c => c.ApiId === 'divine');
+  if (divItem?.CurrentPrice > 0) divinePrice = divItem.CurrentPrice;
+  // mid-валюта: chaos (poe2) / exalted (poe1). В базовой лиге сама base-валюта = 1.
+  const midItem = currency.find(c => c.ApiId === MID_API);
+  chaosPrice = (midItem && midItem.CurrentPrice > 0) ? midItem.CurrentPrice : 1;
+  const ub = document.getElementById('u-base'); if (ub) ub.textContent = U_BASE;
+  const um = document.getElementById('u-mid');  if (um) um.textContent = U_MID;
+  const rlEl = document.getElementById('rate-label');
+  if (rlEl) rlEl.innerHTML = `1 div = <span class="divine-rate">${divinePrice.toFixed(divinePrice<10?2:1)}</span> ${U_BASE} · 1 ${U_MID} = <span class="divine-rate">${chaosPrice.toFixed(chaosPrice<10?2:1)}</span> ${U_BASE}`;
+  const brandEl = document.getElementById('brand');
+  if (brandEl) brandEl.innerHTML = `${REALMS[REALM].emoji} ${REALMS[REALM].game} · <span id="brand-league">${LEAGUE}</span>`;
 
-    const excludeIds = new Set(['divine','mirror', REALMS[REALM].baseApi, MID_API]);
-    const minEx = divinePrice; // порог 1 div (в base-валюте)
+  const allCurrency = cats.flatMap(c => byCategory[c] || []);
 
-    allValidItems = allCurrency
-      .filter(it => it.CurrentPrice >= minEx && safeLogs(it.PriceLogs).length >= 2
-        && !excludeIds.has(it.ApiId)
-        && !(it.ApiId.startsWith('perfect-') && it.ApiId.endsWith('-rune')))
-      .map(it => ({
-        ...it,
-        _flip: calcFlipScore(it.PriceLogs, it.CurrentPrice),
-        _inv:  calcInvestScore(it.PriceLogs),
-      }));
+  // каталог всех предметов для автоподстановки, рыночных цен трекера и Price Check
+  marketByText = {};
+  allCurrency.forEach(it => { if (it.Text) marketByText[it.Text] = it; });
+  // уникалы тоже в каталог (Price Check, журнал, стеш) — валюта приоритетнее при коллизии имён
+  allUniques.forEach(it => { if (it.Text && !marketByText[it.Text]) marketByText[it.Text] = it; });
 
-    const now = new Date().toLocaleTimeString('ru', { hour:'2-digit', minute:'2-digit' });
-    if (usingSnapshot) {
-      const sd = new Date(usingSnapshot).toLocaleString('ru', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
-      document.getElementById('updated').innerHTML = `⚠ живой API недоступен, показан кэш от ${sd} · ${REALMS[REALM].game} · ${LEAGUE}`;
-    } else {
-      document.getElementById('updated').textContent = `Обновлено в ${now} · poe2scout.com · ${REALMS[REALM].game} · ${LEAGUE}`;
-    }
+  const excludeIds = new Set(['divine','mirror', REALMS[REALM].baseApi, MID_API]);
+  const minEx = divinePrice; // порог 1 div (в base-валюте)
 
-    const runesItems     = byCategory['runes']     || [];
-    const fragmentsItems = byCategory['fragments'] || [];
-    const incursionItems = byCategory['incursion'] || [];
+  allValidItems = allCurrency
+    .filter(it => it.CurrentPrice >= minEx && safeLogs(it.PriceLogs).length >= 2
+      && !excludeIds.has(it.ApiId)
+      && !(it.ApiId.startsWith('perfect-') && it.ApiId.endsWith('-rune')))
+    .map(it => ({
+      ...it,
+      _flip: calcFlipScore(it.PriceLogs, it.CurrentPrice),
+      _inv:  calcInvestScore(it.PriceLogs),
+    }));
 
-    document.getElementById('root').innerHTML = `
+  const now = new Date().toLocaleTimeString('ru', { hour:'2-digit', minute:'2-digit' });
+  if (usingSnapshot) {
+    const sd = new Date(usingSnapshot).toLocaleString('ru', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
+    document.getElementById('updated').innerHTML = `⚠ живой API недоступен, показан кэш от ${sd} · ${REALMS[REALM].game} · ${LEAGUE}`;
+  } else {
+    document.getElementById('updated').textContent = `Обновлено в ${now} · poe2scout.com · ${REALMS[REALM].game} · ${LEAGUE}`;
+  }
+
+  const runesItems     = byCategory['runes']     || [];
+  const fragmentsItems = byCategory['fragments'] || [];
+  const incursionItems = byCategory['incursion'] || [];
+
+  document.getElementById('root').innerHTML = `
       <div class="main-tabs">
         <button class="main-tab ${mainTab==='market'?'active':''}" id="mt-market" onclick="switchMainTab('market')">📈 Торговая площадка</button>
         <button class="main-tab ${mainTab==='pricecheck'?'active':''}" id="mt-pricecheck" onclick="switchMainTab('pricecheck')">🔎 Price Check</button>
@@ -2028,7 +2038,7 @@ async function loadAll() {
 
             <p style="margin-top:10px"><b>🔄 Топ флип.</b> Кандидаты на быструю перепродажу. Скор = волатильность за 3 дня × ликвидность × качество точки входа. Фильтры: цена от 1 div, маржа от 10%, от 20 сделок/день. «Купить по» = текущая −2% (лимитка под рынком), «Продать по» = максимум за 3 дня, но не выше +10% от текущей. «Точка входа»: ⬇ хорошо — цена у низа трёхдневного диапазона, ⬆ высоко — у верха (покупать рискованно).</p>
 
-            <p style="margin-top:10px"><b>📦 Долгосрочные вложения.</b> Предметы в устойчивом росте: 7-дневный тренд × консистентность роста × ликвидность, с бонусом за ускорение. «Цель +3д» — линейная экстраполяция дневного прироста, ограничена +50% (параболы не экстраполируются честно). Вкладки категорий есть у обеих таблиц.</p>
+            <p style="margin-top:10px"><b>📦 Долгосрочные вложения.</b> Предметы в устойчивом росте: 3-дневный тренд × консистентность роста × ликвидность, с бонусом за ускорение. «Цель +3д» — линейная экстраполяция дневного прироста, ограничена +50% (параболы не экстраполируются честно). Вкладки категорий есть у обеих таблиц.</p>
 
             <p style="margin-top:10px"><b>⚗️ Крафт арбитраж.</b> Рецепты, где собрать дешевле, чем купить готовое: Origin Core (Cradle + Spark), Simulacrum и Breachstone из 300 сплинтеров, Perfect Runes (Greater + Masterwork + Orb of Extraction — цена Greater берётся с трейда вручную). Учитывай голд-комиссию биржи и время сборки.</p>
 
@@ -2040,7 +2050,7 @@ async function loadAll() {
 
             <p style="margin-top:10px"><b>📦 Stash (вкладка, бывш. Price Check).</b> Быстрая оценка из игры: наведи курсор на предмет, нажми Ctrl+C, кликни в поле и Ctrl+V — оценка запустится сама (кнопка «Из буфера» работает, если браузер разрешает чтение буфера). Распознаются название и Stack Size. Ответ: цена за штуку и за стак в ex/div/chaos и вердикт от «продавать сейчас» до «держать». Здесь же список сохранённых позиций.</p>
 
-            <p style="margin-top:6px"><b>Как строится рекомендация.</b> Сумма шести сигналов: 7д-тренд (рост +15..50% — за держать; перегрев &gt;+50% и падение &lt;−15% — за продажу), разворот (7д рос, а 3д уже в минусе — сильный сигнал продажи), движение за 24ч (просадка &gt;3% после роста — окно фиксации), позиция в 7-дневном диапазоне (у максимума — выгодно продать, у дна без падения — невыгодно), динамика предложения (объём упал — дефицит держит цену, вырос — давит) и ликвидность (меньше 20 сделок/день — продажа затянется). Каждый сигнал виден в обосновании. Оценка чисто статистическая: патчи, анонсы и конец лиги она не знает.</p>
+            <p style="margin-top:6px"><b>Как строится рекомендация.</b> Сумма пяти сигналов: 3д-тренд (рост +10..35% — за держать; перегрев &gt;+35% и падение &lt;−10% — за продажу), движение за 24ч (просадка &gt;3% после роста — окно фиксации, это и есть сигнал разворота при таком коротком окне оценки), позиция в 3-дневном диапазоне (у максимума — выгодно продать, у дна без падения — невыгодно), динамика предложения (объём упал за 3д — дефицит держит цену, вырос — давит) и ликвидность (меньше 20 сделок/день — продажа затянется). Каждый сигнал виден в обосновании. Оценка чисто статистическая: патчи, анонсы и конец лиги она не знает.</p>
 
             <p style="margin-top:10px"><b>📦 Stash.</b> После вставки предмета из буфера (Ctrl+V) он добавляется в Stash автоматически; кнопка «↻ Обновить кол-во в Stash» обновляет количество для того же предмета. Цены и рекомендации пересчитываются живыми при каждом обновлении; Δ — изменение к цене на момент добавления. Повторное добавление того же предмета обновляет количество (база для Δ сохраняется). Клик по названию раскрывает обоснование, наведение — показывает его в подсказке. Сортировка кликом по заголовку: цены и Δ — сначала по убыванию, рекомендация — по срочности продажи. Продал — убери строку ✕.</p>
 
