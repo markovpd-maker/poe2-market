@@ -512,16 +512,16 @@ function avgQty(logs, n) {
   return sl.reduce((a,l) => a + (l.Quantity||0), 0) / sl.length;
 }
 
-// ── FLIP model: окно 3 дня, volatility × liquidity × entry quality ──
+// ── FLIP model: окно 24ч (сегодня к вчера), volatility × liquidity × entry quality ──
 // Штраф за тонкий рынок: <100 сделок/день → линейный понижающий фактор
 function calcFlipScore(logs, curEx) {
-  const sl = recentLogs(logs, 3);
+  const sl = recentLogs(logs, 2);
   if (sl.length < 2 || !curEx) return 0;
   const prices = sl.map(l => l.Price);
   const lo = Math.min(...prices), hi = Math.max(...prices);
   if (lo <= 0) return 0;
   const volatility = (hi - lo) / lo;
-  const aq = avgQty(logs, 3);
+  const aq = avgQty(logs, 2);
   if (aq < 20) return 0; // неликвид — не флипуется
   const liquidity = Math.log10(aq + 1);
   const liqFactor = Math.min(1, aq / 100);
@@ -572,18 +572,18 @@ function trendEl(pct) {
 }
 
 // ── Bids ──
-// Flip: buy = current −2%; sell = min(3д max, cur×1.10)×1.01, floor cur×1.03
+// Flip: buy = current −2%; sell = min(24ч max, cur×1.10)×1.01, floor cur×1.03
 function getFlipBids(logs, curEx) {
-  const sl = recentLogs(logs, 3);
+  const sl = recentLogs(logs, 2);
   if (!sl.length || !curEx) return null;
   const prices = sl.map(l => l.Price);
-  const hi3 = Math.max(...prices);
+  const hi1 = Math.max(...prices);
   const buyEx  = curEx * 0.98;
-  const sellEx = Math.max(curEx * 1.03, Math.min(hi3, curEx * 1.10) * 1.01);
+  const sellEx = Math.max(curEx * 1.03, Math.min(hi1, curEx * 1.10) * 1.01);
   const margin = buyEx > 0 ? (sellEx - buyEx) / buyEx * 100 : 0;
-  const lo3 = Math.min(...prices);
-  const range = hi3 - lo3;
-  const eq = range > 0 ? Math.max(0, Math.min(1, (hi3 - curEx) / range)) : 0.5;
+  const lo1 = Math.min(...prices);
+  const range = hi1 - lo1;
+  const eq = range > 0 ? Math.max(0, Math.min(1, (hi1 - curEx) / range)) : 0.5;
   const eqLabel = eq >= 0.6 ? `<span class="entry-good">⬇ хорошо</span>`
                 : eq >= 0.3 ? `<span class="entry-ok">→ средне</span>`
                 :             `<span class="entry-bad">⬆ высоко</span>`;
@@ -648,10 +648,10 @@ function renderFlipTable(items) {
 
   if (!filtered.length) return '<div class="no-data">Нет предметов в этой категории</div>';
   const showUnits = bEx > 0;
-  const hdr = `<tr><th>#</th><th>Предмет</th><th>Цена</th><th>Купить по</th><th>Продать по</th><th>Маржа</th><th>Точка входа</th><th>3д тренд</th>${showUnits?'<th>Кол-во</th>':''}</tr>`;
+  const hdr = `<tr><th>#</th><th>Предмет</th><th>Цена</th><th>Купить по</th><th>Продать по</th><th>Маржа</th><th>Точка входа</th><th>24ч тренд</th>${showUnits?'<th>Кол-во</th>':''}</tr>`;
   const rows = filtered.map((it,i) => {
     const bids  = getFlipBids(it.PriceLogs, it.CurrentPrice);
-    const t     = trendPct(it.PriceLogs, 3);
+    const t     = trendPct(it.PriceLogs, 2);
     const units = bids && showUnits ? unitsCanBuy(bids.buyEx) : null;
     const buyTxt  = bids ? fmtD(bids.buyEx)  : '—';
     const sellTxt = bids ? fmtD(bids.sellEx) : '—';
@@ -663,7 +663,7 @@ function renderFlipTable(items) {
       <td><div class="name-with-ico">${icoImg(it.IconUrl)}<div><div class="item-name">${it.Text}</div><div class="item-cat">${CAT_LABELS[it.CategoryApiId]||it.CategoryApiId}</div></div></div></td>
       <td><div class="price-now">${fmtD(it.CurrentPrice)}</div></td>
       <td><div class="bid-buy">${buyTxt}</div><div class="bid-sub">−2% от рынка</div></td>
-      <td><div class="bid-sell">${sellTxt}</div><div class="bid-sub">3д max, cap +10%</div></td>
+      <td><div class="bid-sell">${sellTxt}</div><div class="bid-sub">24ч max, cap +10%</div></td>
       <td>${margTxt}</td>
       <td>${eqTxt}</td>
       <td>${trendEl(t)}</td>
@@ -2064,7 +2064,7 @@ function renderMarket(cats, uniqCats, byCategory, uniquesIn, league, categoriesR
 
             <p style="margin-top:10px"><b>💼 Рекомендованный портфель.</b> Делит бюджет между флипом и инвестом (слайдер), внутри корзины — пропорционально скору позиций, остаток докупается жадно. Переключатель «Ордеры в: ex / div / chaos» задаёт валюту котирования: тоталы всегда целые, как требует биржа. Строка позиции: «закупка N шт за X» — ставь buy-ордер по этим числам, «продажа/цель» — sell-ордер. Значок ⚠ значит, что шаг цены в выбранной валюте крупнее реальной маржи — такой ордер может висеть долго, переключись на ex. «Остаток» в сводке — неразменянный хвост меньше самой дешёвой позиции.</p>
 
-            <p style="margin-top:10px"><b>🔄 Топ флип.</b> Кандидаты на быструю перепродажу. Скор = волатильность за 3 дня × ликвидность × качество точки входа. Фильтры: цена от 1 div, маржа от 10%, от 20 сделок/день. «Купить по» = текущая −2% (лимитка под рынком), «Продать по» = максимум за 3 дня, но не выше +10% от текущей. «Точка входа»: ⬇ хорошо — цена у низа трёхдневного диапазона, ⬆ высоко — у верха (покупать рискованно).</p>
+            <p style="margin-top:10px"><b>🔄 Топ флип.</b> Кандидаты на быструю перепродажу. Скор = волатильность за 24ч (сегодня к вчера) × ликвидность × качество точки входа. Фильтры: цена от 1 div, маржа от 10%, от 20 сделок/день. «Купить по» = текущая −2% (лимитка под рынком), «Продать по» = максимум за 24ч, но не выше +10% от текущей. «Точка входа»: ⬇ хорошо — цена у низа суточного диапазона, ⬆ высоко — у верха (покупать рискованно).</p>
 
             <p style="margin-top:10px"><b>📦 Долгосрочные вложения.</b> Предметы в устойчивом росте: 3-дневный тренд × консистентность роста × ликвидность, с бонусом за ускорение. «Цель +3д» — линейная экстраполяция дневного прироста, ограничена +50% (параболы не экстраполируются честно). Вкладки категорий есть у обеих таблиц.</p>
 
