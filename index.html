@@ -213,6 +213,7 @@ th.sort:hover { color: #333; }
 .uniq-icon { width: 30px; height: 30px; object-fit: contain; flex-shrink: 0; }
 /* единый стиль иконок предметов: object-fit:contain не искажает неквадратные иконки PoE2 */
 .item-ico { width: 26px; height: 26px; object-fit: contain; flex-shrink: 0; vertical-align: middle; }
+.item-ico-ph { display:inline-flex; align-items:center; justify-content:center; background:#2a2a3d; border:1px solid #444; border-radius:4px; color:#666; font-size:11px; box-sizing:border-box; }
 .name-with-ico { display: flex; align-items: center; gap: 7px; min-width: 0; }
 .name-with-ico > div { min-width: 0; }
 .uniq-name { font-weight: 700; font-size: 12px; color: #880e4f; }
@@ -487,10 +488,15 @@ function toC(ex) { return ex / chaosPrice; }
 function fmtC(ex, dec=1) { return toC(ex).toFixed(dec) + ' ' + U_MID; }
 
 // Иконка предмета рядом с названием (object-fit:contain — без искажений). По имени берёт url из каталога.
+// Нет url (новый предмет, который poe2scout ещё не проиндексировал) или картинка не загрузилась —
+// показываем нейтральную заглушку вместо пустого места, это не баг, а догоняющие данные апстрима.
 function icoImg(url, px) {
-  if (!url) return '';
-  const st = px ? ` style="width:${px}px;height:${px}px"` : '';
-  return `<img class="item-ico"${st} src="${url}" loading="lazy" onerror="this.style.display='none'" alt="">`;
+  const sz = px || 22;
+  const st = ` style="width:${sz}px;height:${sz}px;font-size:${Math.round(sz*0.6)}px"`;
+  const PH = '👻';
+  const TITLE = 'иконка потерялась (poe2scout её ещё не проиндексировал)';
+  if (!url) return `<span class="item-ico item-ico-ph"${st} title="${TITLE}">${PH}</span>`;
+  return `<img class="item-ico"${st} src="${url}" loading="lazy" onerror="this.outerHTML='<span class=\\'item-ico item-ico-ph\\'${st.replace(/"/g,'&quot;')} title=\\'${TITLE}\\'>${PH}</span>'" alt="">`;
 }
 function icoByName(name, px) { return icoImg(marketByText[name] ? marketByText[name].IconUrl : '', px); }
 
@@ -1823,8 +1829,10 @@ async function loadSnapshotData(realm, league) {
     let key = realm + '|' + league;
     let snap = snaps[key];
     if (!snap) {
-      // нужной лиги нет в кэше (сменилась/название другое) — берём любую сохранённую для этого реалма
-      key = Object.keys(snaps).find(k => k.startsWith(realm + '|'));
+      // нужной лиги нет в кэше (сменилась/название другое) — берём другую закэшированную
+      // лигу этого реалма; если их несколько (SC+HC), по умолчанию предпочитаем SC
+      const keys = Object.keys(snaps).filter(k => k.startsWith(realm + '|'));
+      key = keys.find(k => !/^HC /i.test(k.slice(realm.length + 1))) || keys[0];
       snap = key ? snaps[key] : null;
     }
     if (!snap) return null;
@@ -1906,7 +1914,11 @@ async function loadAll() {
   if (cached) {
     try {
       LEAGUE = cached.league; // временно — чтобы selectbox ниже подсветил правильный option
-      fillGameLeagueSel([]);  // мгновенно: хотя бы игра + текущая (кэшная) лига, без сети
+      // мгновенно, без сети: список лиг реалма из того же кэша (может быть SC+HC сразу)
+      const cachedNames = Object.keys(snapshotFileCache?.snapshots || {})
+        .filter(k => k.startsWith(REALM + '|'))
+        .map(v => ({ Value: v.slice(REALM.length + 1), IsCurrent: true }));
+      fillGameLeagueSel(cachedNames);
       renderMarket(
         cached.snap.cats?.length ? cached.snap.cats : ['currency'],
         cached.snap.uniqCats || [],
