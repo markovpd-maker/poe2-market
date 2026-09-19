@@ -14,14 +14,19 @@ const REALMS = ['poe2', 'pc'];
 
 async function getJson(url, tries = 3) {
   for (let i = 0; i < tries; i++) {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 15000); // без этого зависший запрос может держать job часами
     try {
-      const r = await fetch(url, { headers: { 'User-Agent': 'poe2-market-snapshot/1.0' } });
+      const r = await fetch(url, { headers: { 'User-Agent': 'poe2-market-snapshot/1.0' }, signal: ctrl.signal });
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return await r.json();
     } catch (e) {
-      console.warn(`  попытка ${i + 1}/${tries} для ${url} — ${e.message}`);
-      if (i === tries - 1) throw e;
+      const msg = e.name === 'AbortError' ? 'таймаут 15с' : e.message;
+      console.warn(`  попытка ${i + 1}/${tries} для ${url} — ${msg}`);
+      if (i === tries - 1) throw new Error(msg);
       await new Promise(r => setTimeout(r, 1500));
+    } finally {
+      clearTimeout(t);
     }
   }
 }
@@ -83,13 +88,23 @@ async function snapshotLeague(realm, league, tag) {
 
   const byCategory = {};
   for (const cat of cats) {
-    byCategory[cat] = await fetchCurrencyCategory(realm, league, cat);
+    try {
+      byCategory[cat] = await fetchCurrencyCategory(realm, league, cat);
+    } catch (e) {
+      console.warn(`     категория «${cat}» не снялась: ${e.message} — пропускаю, остальные категории продолжаю`);
+      byCategory[cat] = [];
+    }
     await new Promise(r => setTimeout(r, 150)); // не долбим API без пауз
   }
 
   const uniques = [];
   for (const cat of uniqCats) {
-    const items = await fetchUniqueCategory(realm, league, cat);
+    let items = [];
+    try {
+      items = await fetchUniqueCategory(realm, league, cat);
+    } catch (e) {
+      console.warn(`     уникалы «${cat}» не снялись: ${e.message} — пропускаю`);
+    }
     items.forEach(u => { if (u?.CurrentPrice > 0) { u.CategoryApiId = u.CategoryApiId || cat; uniques.push(u); } });
     await new Promise(r => setTimeout(r, 150));
   }
