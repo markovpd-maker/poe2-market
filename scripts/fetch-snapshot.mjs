@@ -2,12 +2,14 @@
 // Запускается на сервере (GitHub Actions), поэтому CORS тут ни при чём —
 // это не браузерный fetch, а обычный серверный запрос.
 //
+// Снимаются ВСЕ активные лиги реалма (то, что API помечает IsCurrent) — на практике
+// это обычно ровно SC + HC текущего сезона. Постоянные лиги (Standard/Hardcore) и
+// закончившиеся сезоны не трогаем — это не «активные», а вечные/архивные лиги.
+//
 // Локальный запуск: node scripts/fetch-snapshot.mjs
 
 const API_ROOT = 'https://api.poe2scout.com';
 const OUT_PATH = new URL('../data.json', import.meta.url);
-
-// realm -> { emoji, game } — только для логов, на структуру данных не влияет
 const REALMS = ['poe2', 'pc'];
 
 async function getJson(url, tries = 3) {
@@ -45,37 +47,39 @@ async function fetchLeagues(realm) {
   return [];
 }
 
-function pickCurrentLeague(leagues) {
-  return leagues.find(l => l.IsCurrent && !/^HC /i.test(l.Value))
-      || leagues.find(l => l.IsCurrent)
-      || leagues[0];
+function isPermanent(name) {
+  // постоянные лиги (никогда не заканчиваются, не участвуют в сезонной ротации)
+  return /^(standard|hardcore|ssf standard|ssf hardcore)$/i.test((name || '').trim());
+}
+function isHC(name) { return /^HC /i.test(name || ''); }
+
+// «Активные» — всё, что API помечает IsCurrent (обычно SC + HC текущего сезона).
+// Постоянные лиги исключаем: они всегда «текущие» по факту существования, но это
+// не то, что имеется в виду под «активной лигой сезона».
+function pickActiveLeagues(leagues) {
+  const active = leagues.filter(l => l.IsCurrent && l.Value && !isPermanent(l.Value));
+  if (active.length) return active;
+  return leagues[0] ? [leagues[0]] : []; // совсем крайний случай — хоть что-то
 }
 
 async function fetchCategoriesResp(realm, league) {
   return await getJson(`${API_ROOT}/${realm}/Leagues/${encodeURIComponent(league)}/Items/Categories`);
 }
-
 async function fetchCurrencyCategory(realm, league, cat) {
   const d = await getJson(`${API_ROOT}/${realm}/Leagues/${encodeURIComponent(league)}/Currencies/ByCategory?Category=${encodeURIComponent(cat)}&Page=1&PerPage=250`);
   return Array.isArray(d?.Items) ? d.Items : [];
 }
-
 async function fetchUniqueCategory(realm, league, cat) {
   const d = await getJson(`${API_ROOT}/${realm}/Leagues/${encodeURIComponent(league)}/Uniques/ByCategory?Category=${encodeURIComponent(cat)}&Page=1&PerPage=100`);
   return Array.isArray(d?.Items) ? d.Items : [];
 }
 
-async function snapshotRealm(realm, fallbackLeagueGuess) {
-  console.log(`\n== ${realm} ==`);
-  const leagues = await fetchLeagues(realm);
-  const league = pickCurrentLeague(leagues)?.Value || fallbackLeagueGuess;
-  if (!league) throw new Error(`нет текущей лиги для ${realm} (список лиг недоступен, и прошлого снимка тоже нет)`);
-  console.log(`  лига: ${league}${leagues.length ? '' : ' (список лиг недоступен — взял из прошлого снимка)'}`);
-
+async function snapshotLeague(realm, league, tag) {
+  console.log(`  -- ${tag}: ${league}`);
   const categoriesResp = await fetchCategoriesResp(realm, league);
   const cats     = (categoriesResp?.CurrencyCategories || []).map(c => c.ApiId);
   const uniqCats = (categoriesResp?.UniqueCategories   || []).map(c => c.ApiId);
-  console.log(`  категорий валюты: ${cats.length}, уникалов: ${uniqCats.length}`);
+  console.log(`     категорий валюты: ${cats.length}, уникалов: ${uniqCats.length}`);
 
   const byCategory = {};
   for (const cat of cats) {
@@ -92,11 +96,35 @@ async function snapshotRealm(realm, fallbackLeagueGuess) {
 
   return {
     key: `${realm}|${league}`,
-    snapshot: {
-      savedAt: new Date().toISOString(),
-      cats, uniqCats, byCategory, uniques, categoriesResp,
-    },
+    snapshot: { savedAt: new Date().toISOString(), cats, uniqCats, byCategory, uniques, categoriesResp },
   };
+}
+
+// Возвращает МАССИВ снимков — по одному на каждую активную лигу реалма (SC, HC, ...).
+async function snapshotRealm(realm, fallbackLeagueNames) {
+  console.log(`\n== ${realm} ==`);
+  const leagues = await fetchLeagues(realm);
+
+  let names = [], note = '';
+  if (leagues.length) names = pickActiveLeagues(leagues).map(l => l.Value);
+  if (!names.length) {
+    // список лиг недоступен целиком — работаем с тем, что уже было в кэше на прошлый раз
+    names = fallbackLeagueNames || [];
+    note = ' (список лиг недоступен — взял из прошлого снимка)';
+  }
+  if (!names.length) throw new Error(`нет активных лиг для ${realm} (ни живого списка, ни прошлого снимка)`);
+  console.log(`  активные лиги: ${names.join(', ')}${note}`);
+
+  const out = [];
+  for (const name of names) {
+    try {
+      out.push(await snapshotLeague(realm, name, isHC(name) ? 'HC' : 'SC'));
+    } catch (e) {
+      console.warn(`  лига «${name}» не снялась: ${e.message} — пропускаю только её`);
+    }
+  }
+  if (!out.length) throw new Error(`ни одна активная лига не снялась для ${realm}`);
+  return out;
 }
 
 async function main() {
@@ -111,13 +139,17 @@ async function main() {
 
   for (const realm of REALMS) {
     try {
-      const prevKey = Object.keys(snapshots).find(k => k.startsWith(realm + '|'));
-      const prevLeagueGuess = prevKey ? prevKey.slice(realm.length + 1) : undefined;
-      const { key, snapshot } = await snapshotRealm(realm, prevLeagueGuess);
-      // старые лиги этого реалма больше не актуальны (лига закончилась) — убираем,
-      // иначе loadSnapshotData на клиенте может случайно подхватить протухший ключ
-      Object.keys(snapshots).forEach(k => { if (k.startsWith(realm + '|') && k !== key) delete snapshots[k]; });
-      snapshots[key] = snapshot;
+      const prevNames = Object.keys(snapshots)
+        .filter(k => k.startsWith(realm + '|'))
+        .map(k => k.slice(realm.length + 1));
+
+      const results = await snapshotRealm(realm, prevNames);
+      const newKeys = results.map(r => r.key);
+
+      // лиги этого реалма, которых больше нет в свежем активном наборе (сезон сменился) — убираем,
+      // иначе loadSnapshotData на клиенте может подхватить протухший ключ
+      Object.keys(snapshots).forEach(k => { if (k.startsWith(realm + '|') && !newKeys.includes(k)) delete snapshots[k]; });
+      results.forEach(({ key, snapshot }) => { snapshots[key] = snapshot; });
       okCount++;
     } catch (e) {
       console.error(`!! ${realm} не снялся: ${e.message} — оставляю прошлый кэш этого реалма как есть`);
@@ -130,7 +162,7 @@ async function main() {
   }
 
   await fs.writeFile(OUT_PATH, JSON.stringify({ snapshots }), 'utf8');
-  console.log(`\nГотово: ${okCount}/${REALMS.length} реалмов обновлено, data.json записан.`);
+  console.log(`\nГотово: ${okCount}/${REALMS.length} реалмов обновлено, data.json записан (лиг всего: ${Object.keys(snapshots).length}).`);
 }
 
 main().catch(e => { console.error(e); process.exit(1); });
