@@ -17,247 +17,316 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<script>try{document.documentElement.setAttribute("data-theme",localStorage.getItem("poe2_theme")||"dark")}catch(e){document.documentElement.setAttribute("data-theme","dark")}</script>
 <title>PoE2 Market — Runes of Aldur</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.0/dist/chart.umd.js" integrity="sha384-iU8HYtnGQ8Cy4zl7gbNMOhsDTTKX02BTXptVP/vqAWIaTfM7isw76iyZCsjL2eVi" crossorigin="anonymous"></script>
 <style>
-:root { color-scheme: light; }
-* { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f4f0; color: #1a1a2e; font-size: 13px; }
-
-.header {
-  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
-  color: #e0d5c0; padding: 11px 18px;
-  display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  border-bottom: 2px solid #c9a84c;
+/* ── Тема ──
+   Тёмная по умолчанию, светлая включается кнопкой в шапке (запоминается в localStorage).
+   Все цвета — через переменные; акцент раздела = цвет текста его заголовка (currentColor). */
+:root {
+  color-scheme: dark;
+  --bg: #0d1020;       --surface: #151a2e;  --surface-2: #1a2036;  --raised: #222a46;
+  --line: #2b3354;     --line-soft: #212843;
+  --text: #ebe6d8;     --muted: #a3a9c4;    --faint: #7e86a6;
+  --gold: #d8b45f;     --gold-hi: #f2cf79;
+  --flip: #f3a950;     --flip-bg: rgba(243,169,80,.12);
+  --gain: #62d19a;     --gain-bg: rgba(98,209,154,.12);
+  --buy:  #7cb0ff;     --buy-bg:  rgba(124,176,255,.12);
+  --craft:#b69cff;     --craft-bg:rgba(182,156,255,.12);
+  --uniq: #ef9a5d;     --uniq-bg: rgba(239,154,93,.12);
+  --pc:   #4fd1c5;     --pc-bg:   rgba(79,209,197,.12);
+  --loss: #ff7a7a;     --loss-bg: rgba(255,122,122,.12);
+  --on-accent: #0d1020;
+  --grid: rgba(255,255,255,.025);
+  --hdr-bg: #090c19;   --hdr-text: #ebe6d8;
+  --font-ui: 'Segoe UI Variable','Segoe UI',system-ui,-apple-system,Roboto,'Helvetica Neue',sans-serif;
+  --font-serif: 'Iowan Old Style','Palatino Linotype',Palatino,'Book Antiqua',Georgia,serif;
 }
-.header-title { font-size: 15px; font-weight: 700; white-space: nowrap; }
-.header-title span { color: #c9a84c; }
-.header-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.divine-rate-label { font-size: 11px; color: #9090a8; white-space: nowrap; }
-.divine-rate { color: #c9a84c; font-weight: 600; }
-.budget-wrap { display: flex; align-items: center; gap: 6px; background: #ffffff12; border: 1px solid #c9a84c44; border-radius: 6px; padding: 3px 10px; }
-.budget-wrap label { font-size: 11px; color: #c9a84c; white-space: nowrap; }
-.budget-input { width: 65px; background: transparent; border: none; outline: none; color: #ffd700; font-weight: 700; font-size: 13px; text-align: right; }
-.budget-unit { font-size: 11px; color: #c9a84c; }
-.btn-refresh { background: #c9a84c22; border: 1px solid #c9a84c55; color: #c9a84c; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 11px; transition: background .2s; white-space: nowrap; }
-.btn-refresh:hover { background: #c9a84c44; }
-.profile-sel { background: transparent; color: #ffd700; border: none; outline: none; font-size: 12px; font-weight: 600; max-width: 110px; }
-.profile-sel option { background: #1a1a2e; color: #ffd700; }
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f1eee6;       --surface: #ffffff;  --surface-2: #faf8f3;  --raised: #f3f0e7;
+  --line: #d9d4c6;     --line-soft: #ebe7dc;
+  --text: #1c1f33;     --muted: #565b75;    --faint: #6b7089;
+  --gold: #8a6a12;     --gold-hi: #a67c0a;
+  --flip: #b45309;     --flip-bg: rgba(180,83,9,.09);
+  --gain: #15803d;     --gain-bg: rgba(21,128,61,.09);
+  --buy:  #1d4ed8;     --buy-bg:  rgba(29,78,216,.08);
+  --craft:#6d28d9;     --craft-bg:rgba(109,40,217,.08);
+  --uniq: #c2410c;     --uniq-bg: rgba(194,65,12,.08);
+  --pc:   #0f766e;     --pc-bg:   rgba(15,118,110,.09);
+  --loss: #c62828;     --loss-bg: rgba(198,40,40,.08);
+  --on-accent: #ffffff;
+  --grid: rgba(28,31,51,.035);
+  --hdr-bg: #141a33;   --hdr-text: #ebe6d8;
+}
 
-.loading { text-align: center; padding: 60px 20px; color: #666; }
-.spinner { display: inline-block; width: 32px; height: 32px; border: 3px solid #ddd; border-top-color: #c9a84c; border-radius: 50%; animation: spin .8s linear infinite; margin-bottom: 12px; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scrollbar-color: var(--line) transparent; }
+body {
+  font-family: var(--font-ui); font-size: 13px; line-height: 1.4;
+  background-color: var(--bg); color: var(--text);
+  background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 44px 44px;
+  font-variant-numeric: tabular-nums;
+}
+:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; border-radius: 3px; }
+button { font-family: inherit; }
+@media (prefers-reduced-motion: reduce) { * { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
+
+/* ── Шапка ── */
+.header {
+  background: var(--hdr-bg); color: var(--hdr-text); padding: 10px 18px;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  border-bottom: 1px solid #d8b45f;
+  box-shadow: 0 1px 0 #00000055;
+}
+.header-title { font-family: var(--font-serif); font-size: 18px; font-weight: 600; letter-spacing: .01em; white-space: nowrap; display: flex; align-items: center; gap: 9px; }
+/* табличка лиги — как заголовок предмета в игре: рамка, засечки, ромбики по краям */
+.header-title span {
+  color: #f2cf79; font-size: 15px; padding: 1px 12px; border: 1px solid #d8b45f; border-radius: 3px;
+  background: linear-gradient(180deg, #d8b45f1f, #d8b45f0a);
+  display: inline-flex; align-items: center; gap: 8px;
+}
+.header-title span::before, .header-title span::after { content: '◆'; font-size: 7px; color: #d8b45f; opacity: .8; }
+#updated { color: var(--hdr-text); opacity: .62; }
+.header-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.divine-rate-label { font-size: 11px; color: #a3a9c4; white-space: nowrap; }
+.divine-rate { color: #f2cf79; font-weight: 600; }
+.budget-wrap { display: flex; align-items: center; gap: 6px; background: #ffffff0d; border: 1px solid #d8b45f3d; border-radius: 5px; padding: 3px 10px; }
+.budget-wrap label { font-size: 12px; color: #d8b45f; white-space: nowrap; }
+.budget-input { width: 65px; background: transparent; border: none; outline: none; color: #f2cf79; font-weight: 700; font-size: 13px; text-align: right; font-family: inherit; }
+.budget-input::placeholder { color: #f2cf7955; }
+.budget-unit { font-size: 11px; color: #d8b45f; }
+.btn-refresh { background: #d8b45f1f; border: 1px solid #d8b45f55; color: #f2cf79; padding: 4px 12px; border-radius: 5px; cursor: pointer; font-size: 11px; transition: background .15s; white-space: nowrap; }
+.btn-refresh:hover { background: #d8b45f3d; }
+.profile-sel { background: transparent; color: #f2cf79; border: none; outline: none; font-size: 12px; font-weight: 600; max-width: 110px; font-family: inherit; }
+.profile-sel option { background: #151a2e; color: #f2cf79; }
+
+.loading { text-align: center; padding: 60px 20px; color: var(--muted); }
+.spinner { display: inline-block; width: 32px; height: 32px; border: 3px solid var(--line); border-top-color: var(--gold); border-radius: 50%; animation: spin .8s linear infinite; margin-bottom: 12px; }
 @keyframes spin { to { transform: rotate(360deg); } }
-.error-msg { background: #fee; border: 1px solid #fcc; color: #c00; padding: 12px 16px; border-radius: 6px; margin: 16px; }
+.error-msg { background: var(--loss-bg); border: 1px solid var(--loss); color: var(--loss); padding: 12px 16px; border-radius: 6px; margin: 16px; line-height: 1.5; }
+.error-msg code { color: var(--text); background: var(--surface-2); padding: 1px 5px; border-radius: 3px; }
 
-.content { padding: 13px; display: flex; flex-direction: column; gap: 13px; }
+.content { padding: 14px; display: flex; flex-direction: column; gap: 14px; }
 
-/* Hinekora */
-.hineroka-block { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); border: 1px solid #c9a84c55; border-radius: 10px; padding: 13px; color: #e0d5c0; }
-.hineroka-block h2 { color: #c9a84c; font-size: 13px; font-weight: 700; margin-bottom: 10px; display: flex; align-items: center; gap: 7px; }
+/* ── Hinekora's Lock ── */
+.hineroka-block { background: var(--surface); border: 1px solid var(--gold); border-radius: 8px; padding: 13px 14px; color: var(--text); }
+.hineroka-block h2 { color: var(--gold-hi); font-family: var(--font-serif); font-size: 15px; font-weight: 600; margin-bottom: 10px; display: flex; align-items: center; gap: 7px; }
 .hineroka-block h2 img { width: 22px; height: 22px; image-rendering: pixelated; }
 .hineroka-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; align-items: start; }
-.hst .label { font-size: 10px; color: #9090a8; text-transform: uppercase; letter-spacing: .4px; margin-bottom: 3px; }
-.hst .value { font-size: 18px; font-weight: 700; color: #ffd700; }
-.hst .sub { font-size: 11px; color: #c9a84c; margin-top: 2px; }
-.chg-up { color: #4caf50; font-size: 11px; }
-.chg-dn { color: #f44336; font-size: 11px; }
-.verdict-badge { padding: 7px 12px; border-radius: 8px; font-weight: 700; font-size: 13px; text-align: center; }
-.verdict-hold { background: #4caf5022; border: 1px solid #4caf5055; color: #4caf50; }
-.verdict-sell { background: #ff980022; border: 1px solid #ff980055; color: #ff9800; }
-.verdict-sub { font-size: 10px; color: #9090a8; margin-top: 4px; }
+.hst .label { font-size: 11px; color: var(--faint); margin-bottom: 3px; }
+.hst .value { font-size: 19px; font-weight: 700; color: var(--gold-hi); }
+.hst .sub { font-size: 11px; color: var(--gold); margin-top: 2px; }
+.chg-up { color: var(--gain); font-size: 11px; }
+.chg-dn { color: var(--loss); font-size: 11px; }
+.verdict-badge { padding: 7px 12px; border-radius: 6px; font-weight: 700; font-size: 13px; text-align: center; }
+.verdict-hold { background: var(--gain-bg); border: 1px solid var(--gain); color: var(--gain); }
+.verdict-sell { background: var(--flip-bg); border: 1px solid var(--flip); color: var(--flip); }
+.verdict-sub { font-size: 10px; color: var(--faint); margin-top: 4px; }
 .hineroka-chart-wrap { height: 105px; margin-top: 10px; position: relative; }
 
-/* Cards */
-.cards-row { display: grid; grid-template-columns: 1fr 1fr; gap: 13px; }
+/* ── Панели ── */
+.cards-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 @media (max-width: 760px) { .cards-row { grid-template-columns: 1fr; } .hineroka-grid { grid-template-columns: 1fr 1fr; } }
-.card { background: #fff; border: 1px solid #e0ddd8; border-radius: 10px; overflow: hidden; }
-.card-header { padding: 8px 13px; font-weight: 700; font-size: 13px; display: flex; align-items: center; gap: 6px; border-bottom: 1px solid #e0ddd8; flex-wrap: wrap; }
-.card-header.flip   { background: #fff8e1; color: #e65100; }
-.card-header.invest { background: #e8f5e9; color: #1b5e20; }
-.card-header.rates  { background: #e3f2fd; color: #0d47a1; }
-.badge { font-size: 10px; padding: 2px 7px; border-radius: 10px; margin-left: auto; font-weight: 600; }
-.badge-flip   { background: #ff6d00; color: #fff; }
-.badge-invest { background: #2e7d32; color: #fff; }
-.badge-rates  { background: #1565c0; color: #fff; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; overflow-x: auto; overflow-y: hidden; }
+/* верхняя кромка = цвет раздела (currentColor заголовка): так видно тип панели ещё до чтения названия */
+.card-header {
+  padding: 9px 14px; font-family: var(--font-serif); font-weight: 600; font-size: 14px; letter-spacing: .01em;
+  display: flex; align-items: center; gap: 6px; border-bottom: 1px solid var(--line); flex-wrap: wrap;
+  box-shadow: inset 0 2px 0 currentColor; color: var(--gold);
+}
+.card-header.flip   { background: var(--flip-bg); color: var(--flip); }
+.card-header.invest { background: var(--gain-bg); color: var(--gain); }
+.card-header.rates  { background: var(--buy-bg);  color: var(--buy); }
+.badge { font-family: var(--font-ui); font-size: 10px; padding: 2px 8px; border-radius: 999px; margin-left: auto; font-weight: 700; color: var(--on-accent); }
+.badge-flip   { background: var(--flip); }
+.badge-invest { background: var(--gain); }
+.badge-rates  { background: var(--buy); }
 
-/* Category tabs */
-.cat-tabs { display: flex; gap: 4px; flex-wrap: wrap; padding: 7px 10px; border-bottom: 1px solid #e0ddd8; background: #fafafa; }
-.cat-tab { padding: 3px 9px; border-radius: 12px; font-size: 11px; cursor: pointer; border: 1px solid #ddd; background: #fff; color: #555; transition: all .15s; white-space: nowrap; }
-.cat-tab:hover { border-color: #aaa; color: #222; }
-.cat-tab.active-flip   { background: #ff6d00; border-color: #ff6d00; color: #fff; font-weight: 600; }
-.cat-tab.active-invest { background: #2e7d32; border-color: #2e7d32; color: #fff; font-weight: 600; }
+/* ── Вкладки категорий ── */
+.cat-tabs { display: flex; gap: 4px; flex-wrap: wrap; padding: 8px 10px; border-bottom: 1px solid var(--line-soft); background: var(--surface-2); }
+.cat-tab { padding: 3px 10px; border-radius: 999px; font-size: 11px; cursor: pointer; border: 1px solid var(--line); background: transparent; color: var(--muted); transition: border-color .15s, color .15s; white-space: nowrap; font-family: inherit; }
+.cat-tab:hover { border-color: var(--faint); color: var(--text); }
+.cat-tab.active-flip   { background: var(--flip); border-color: var(--flip); color: var(--on-accent); font-weight: 700; }
+.cat-tab.active-invest { background: var(--gain); border-color: var(--gain); color: var(--on-accent); font-weight: 700; }
 
+/* ── Таблицы ── */
 table { width: 100%; border-collapse: collapse; }
-th { padding: 5px 8px; text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: .4px; color: #888; background: #fafafa; border-bottom: 1px solid #eee; white-space: nowrap; }
-td { padding: 5px 8px; border-bottom: 1px solid #f0f0f0; vertical-align: middle; }
+th { padding: 6px 6px; text-align: left; font-size: 11px; font-weight: 600; color: var(--faint); background: var(--surface-2); border-bottom: 1px solid var(--line); white-space: nowrap; }
+td { padding: 6px 6px; border-bottom: 1px solid var(--line-soft); vertical-align: middle; }
 tr:last-child td { border-bottom: none; }
-tr:hover td { background: #fafaf8; }
-.item-name { font-weight: 600; font-size: 12px; color: #1a1a2e; }
-.item-cat  { font-size: 10px; color: #ccc; }
-.price-now  { font-weight: 700; color: #1a1a2e; font-size: 12px; }
-.bid-buy    { color: #1565c0; font-weight: 700; font-size: 12px; }
-.bid-sell   { color: #2e7d32; font-weight: 700; font-size: 12px; }
-.bid-sub    { font-size: 10px; color: #bbb; }
-.margin-good { color: #2e7d32; font-weight: 700; font-size: 12px; }
-.margin-ok   { color: #f57c00; font-weight: 700; font-size: 12px; }
-.margin-low  { color: #bbb; font-size: 12px; }
-.entry-good  { color: #2e7d32; font-size: 11px; font-weight: 600; }
-.entry-ok    { color: #f57c00; font-size: 11px; }
-.entry-bad   { color: #f44336; font-size: 11px; }
-.units-badge { background: #e3f2fd; color: #1565c0; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: 600; }
-.trend-up   { color: #2e7d32; font-weight: 600; font-size: 11px; }
-.trend-down { color: #c62828; font-weight: 600; font-size: 11px; }
-.trend-flat { color: #888; font-size: 11px; }
-.rank { color: #bbb; font-size: 11px; font-weight: 600; }
-.rank.top3 { color: #c9a84c; }
-.liq-low { color: #f44336; font-size: 10px; }
+tr:hover td { background: var(--raised); }
+.item-name { font-weight: 600; font-size: 12px; color: var(--text); }
+.item-cat  { font-size: 10px; color: var(--faint); }
+.price-now  { font-weight: 700; color: var(--text); font-size: 12px; white-space: nowrap; }
+.bid-buy    { color: var(--buy); font-weight: 700; font-size: 12px; }
+.bid-sell   { color: var(--gain); font-weight: 700; font-size: 12px; }
+.bid-sub    { font-size: 10px; color: var(--faint); }
+.margin-good { color: var(--gain); font-weight: 700; font-size: 12px; }
+.margin-ok   { color: var(--flip); font-weight: 700; font-size: 12px; }
+.margin-low  { color: var(--faint); font-size: 12px; }
+.entry-good  { color: var(--gain); font-size: 11px; font-weight: 600; }
+.entry-ok    { color: var(--flip); font-size: 11px; }
+.entry-bad   { color: var(--loss); font-size: 11px; }
+.units-badge { background: var(--buy-bg); color: var(--buy); padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+.trend-up   { color: var(--gain); font-weight: 600; font-size: 11px; }
+.trend-down { color: var(--loss); font-weight: 600; font-size: 11px; }
+.trend-flat { color: var(--faint); font-size: 11px; }
+.rank { color: var(--faint); font-size: 11px; font-weight: 600; }
+.rank.top3 { color: var(--gold-hi); }
+.liq-low { color: var(--loss); font-size: 10px; }
 
-.rates-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(125px, 1fr)); }
-.rate-item { padding: 7px 11px; border-bottom: 1px solid #f0f0f0; border-right: 1px solid #f0f0f0; }
-.rate-item .r-name { font-size: 11px; color: #555; margin-bottom: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rate-item .r-val   { font-size: 13px; font-weight: 700; color: #0d47a1; }
+.rates-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+.rate-item { padding: 8px 11px; border-bottom: 1px solid var(--line-soft); border-right: 1px solid var(--line-soft); }
+.rate-item .r-name { font-size: 11px; color: var(--muted); margin-bottom: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rate-item .r-val   { font-size: 14px; font-weight: 700; color: var(--buy); }
 .rate-item .r-change { font-size: 10px; }
-.no-data { padding: 14px; color: #aaa; text-align: center; font-size: 12px; }
+.no-data { padding: 14px; color: var(--faint); text-align: center; font-size: 12px; }
 
-/* Portfolio */
-.portfolio-block { background: #fff; border: 1px solid #e0ddd8; border-radius: 10px; overflow: hidden; }
-.portfolio-block .card-header { background: linear-gradient(90deg,#1a1a2e,#16213e); color: #c9a84c; }
-.pf-split { display: flex; align-items: center; gap: 8px; padding: 8px 13px; border-bottom: 1px solid #f0f0f0; background: #fafafa; flex-wrap: wrap; }
-.pf-split label { font-size: 11px; color: #555; }
-.pf-slider { width: 120px; accent-color: #c9a84c; }
-.cur-btn { padding: 2px 9px; border-radius: 10px; font-size: 11px; cursor: pointer; border: 1px solid #ddd; background: #fff; color: #555; }
-.cur-btn:hover { border-color: #aaa; }
-.cur-btn.active { background: #1a1a2e; border-color: #1a1a2e; color: #ffd700; font-weight: 700; }
-.grid-warn { color: #f57c00; font-size: 10px; }
-.pf-flip-lbl  { color: #e65100; font-weight: 700; font-size: 11px; }
-.pf-invest-lbl { color: #2e7d32; font-weight: 700; font-size: 11px; }
+/* ── Портфель ── */
+.portfolio-block { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; overflow-x: auto; overflow-y: hidden; }
+.portfolio-block .card-header { background: #d8b45f14; color: var(--gold-hi); }
+.pf-split { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-bottom: 1px solid var(--line-soft); background: var(--surface-2); flex-wrap: wrap; }
+.pf-split label { font-size: 11px; color: var(--muted); }
+.pf-slider { width: 120px; accent-color: var(--gold); }
+.cur-btn { padding: 2px 10px; border-radius: 999px; font-size: 11px; cursor: pointer; border: 1px solid var(--line); background: transparent; color: var(--muted); font-family: inherit; }
+.cur-btn:hover { border-color: var(--faint); color: var(--text); }
+.cur-btn.active { background: var(--gold); border-color: var(--gold); color: var(--on-accent); font-weight: 700; }
+.grid-warn { color: var(--flip); font-size: 10px; }
+.pf-flip-lbl  { color: var(--flip); font-weight: 700; font-size: 11px; }
+.pf-invest-lbl { color: var(--gain); font-weight: 700; font-size: 11px; }
 .pf-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 0; }
 @media (max-width: 760px) { .pf-cols { grid-template-columns: 1fr; } }
-.pf-col { border-right: 1px solid #f0f0f0; }
+.pf-col { border-right: 1px solid var(--line-soft); }
 .pf-col:last-child { border-right: none; }
-.pf-col-hdr { padding: 6px 13px; font-size: 11px; font-weight: 700; border-bottom: 1px solid #f0f0f0; display: flex; justify-content: space-between; align-items: center; }
-.pf-col-hdr.flip-hdr   { background: #fff8e1; color: #e65100; }
-.pf-col-hdr.invest-hdr { background: #e8f5e9; color: #1b5e20; }
-.pf-total { font-size: 11px; font-weight: 400; color: #888; }
+.pf-col-hdr { padding: 6px 14px; font-size: 11px; font-weight: 700; border-bottom: 1px solid var(--line-soft); display: flex; justify-content: space-between; align-items: center; }
+.pf-col-hdr.flip-hdr   { background: var(--flip-bg); color: var(--flip); }
+.pf-col-hdr.invest-hdr { background: var(--gain-bg); color: var(--gain); }
+.pf-total { font-size: 11px; font-weight: 400; color: var(--faint); }
 .pf-total span { font-weight: 700; }
-.pf-row { display: flex; align-items: center; gap: 8px; padding: 7px 13px; border-bottom: 1px solid #f8f8f8; }
+.pf-row { display: flex; align-items: center; gap: 8px; padding: 7px 14px; border-bottom: 1px solid var(--line-soft); }
 .pf-row:last-child { border-bottom: none; }
-.pf-num { font-size: 11px; color: #c9a84c; font-weight: 700; min-width: 16px; }
+.pf-num { font-size: 11px; color: var(--gold); font-weight: 700; min-width: 16px; }
 .pf-info { flex: 1; min-width: 0; }
-.pf-name { font-size: 12px; font-weight: 600; color: #1a1a2e; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.pf-detail { font-size: 10px; color: #aaa; margin-top: 1px; }
+.pf-name { font-size: 12px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pf-detail { font-size: 10px; color: var(--faint); margin-top: 1px; }
 .pf-alloc { text-align: right; min-width: 80px; }
-.pf-alloc .qty { font-size: 13px; font-weight: 700; color: #1a1a2e; }
-.pf-alloc .cost { font-size: 10px; color: #aaa; }
+.pf-alloc .qty { font-size: 13px; font-weight: 700; color: var(--text); }
+.pf-alloc .cost { font-size: 10px; color: var(--faint); }
 .pf-alloc .profit { font-size: 11px; font-weight: 700; }
-.pf-profit-good { color: #2e7d32; }
-.pf-profit-ok   { color: #f57c00; }
-.pf-summary { display: flex; gap: 16px; padding: 8px 13px; background: #fafafa; border-top: 1px solid #f0f0f0; flex-wrap: wrap; }
-.pf-summary-item { font-size: 11px; color: #555; }
-.pf-summary-item span { font-weight: 700; color: #1a1a2e; }
-.pf-no-budget { padding: 20px; text-align: center; color: #aaa; font-size: 12px; }
+.pf-profit-good { color: var(--gain); }
+.pf-profit-ok   { color: var(--flip); }
+.pf-summary { display: flex; gap: 16px; padding: 8px 14px; background: var(--surface-2); border-top: 1px solid var(--line-soft); flex-wrap: wrap; }
+.pf-summary-item { font-size: 11px; color: var(--muted); }
+.pf-summary-item span { font-weight: 700; color: var(--text); }
+.pf-no-budget { padding: 20px; text-align: center; color: var(--faint); font-size: 12px; }
 
-/* Collapsible sections */
+/* ── Сворачиваемые секции ── */
 .coll-chev { margin-right: 5px; color: inherit; opacity: .6; font-size: 11px; }
 .card-header.coll { cursor: pointer; user-select: none; }
+.card-header.coll:hover { filter: brightness(1.12); }
 
-/* Main tabs */
-.main-tabs { display: flex; gap: 6px; padding: 10px 13px 0; }
-.main-tab { padding: 6px 16px; border-radius: 8px 8px 0 0; border: 1px solid #e0ddd8; border-bottom: none; background: #eceae5; color: #777; cursor: pointer; font-size: 13px; font-weight: 600; }
-.main-tab.active { background: #fff; color: #1a1a2e; }
+/* ── Главные вкладки ── */
+.main-tabs { display: flex; gap: 4px; padding: 12px 14px 0; border-bottom: 1px solid var(--line); margin: 0 0 -1px; flex-wrap: wrap; }
+.main-tab { padding: 7px 16px; border-radius: 6px 6px 0 0; border: 1px solid transparent; border-bottom: none; background: transparent; color: var(--muted); cursor: pointer; font-size: 13px; font-weight: 600; font-family: inherit; }
+.main-tab:hover { color: var(--text); background: var(--surface-2); }
+.main-tab.active { background: var(--surface); color: var(--gold-hi); border-color: var(--line); box-shadow: inset 0 2px 0 var(--gold); position: relative; top: 1px; }
 
-/* Price check */
-.pc-form { display: flex; gap: 8px; padding: 10px 13px; align-items: flex-start; border-bottom: 1px solid #f0f0f0; background: #fafafa; flex-wrap: wrap; }
-.pc-form textarea { flex: 1; min-width: 260px; height: 110px; font-family: ui-monospace, Consolas, monospace; font-size: 11px; padding: 8px; border: 1px solid #ddd; border-radius: 6px; resize: vertical; background: #fff; color: #1a1a2e; outline: none; }
-.pc-form textarea:focus { border-color: #00897b; }
-.pc-res { padding: 12px 13px; }
+/* ── Price check ── */
+.pc-form { display: flex; gap: 8px; padding: 10px 14px; align-items: flex-start; border-bottom: 1px solid var(--line-soft); background: var(--surface-2); flex-wrap: wrap; }
+.pc-form textarea { flex: 1; min-width: 260px; height: 110px; font-family: ui-monospace, Consolas, monospace; font-size: 11px; padding: 8px; border: 1px solid var(--line); border-radius: 5px; resize: vertical; background: var(--bg); color: var(--text); outline: none; }
+.pc-form textarea:focus { border-color: var(--pc); }
+.pc-res { padding: 12px 14px; }
 .pc-prices { display: flex; gap: 14px; flex-wrap: wrap; margin: 8px 0; }
-.pc-price-box { background: #f5f4f0; border: 1px solid #e0ddd8; border-radius: 8px; padding: 8px 12px; }
-.pc-price-box .lbl { font-size: 10px; color: #888; text-transform: uppercase; letter-spacing: .4px; }
-.pc-price-box .val { font-size: 15px; font-weight: 700; color: #1a1a2e; }
-.pc-reason { font-size: 12px; color: #555; padding: 2px 0; }
+.pc-price-box { background: var(--surface-2); border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; }
+.pc-price-box .lbl { font-size: 11px; color: var(--faint); }
+.pc-price-box .val { font-size: 15px; font-weight: 700; color: var(--text); }
+.pc-reason { font-size: 12px; color: var(--muted); padding: 2px 0; }
 th.sort { cursor: pointer; user-select: none; }
-th.sort:hover { color: #333; }
-.verdict-neutral { background: #9e9e9e22; border: 1px solid #9e9e9e55; color: #616161; }
+th.sort:hover { color: var(--text); }
+.verdict-neutral { background: #9e9e9e22; border: 1px solid var(--faint); color: var(--muted); }
 
-/* Trade tracker */
-.tracker-block { background: #fff; border: 1px solid #e0ddd8; border-radius: 10px; overflow: hidden; }
-.tracker-block .card-header { background: #ede7f6; color: #311b92; }
-.tr-form { display: flex; gap: 6px; padding: 9px 13px; border-bottom: 1px solid #f0f0f0; background: #fafafa; flex-wrap: wrap; align-items: center; }
-.tr-form select, .tr-form input { padding: 4px 7px; border: 1px solid #ddd; border-radius: 5px; font-size: 12px; background: #fff; color: #1a1a2e; outline: none; }
-.tr-form select:focus, .tr-form input:focus { border-color: #7b1fa2; }
+/* ── Журнал сделок ── */
+.tracker-block { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; overflow-x: auto; overflow-y: hidden; }
+.tracker-block .card-header { background: var(--craft-bg); color: var(--craft); }
+.tr-form { display: flex; gap: 6px; padding: 9px 14px; border-bottom: 1px solid var(--line-soft); background: var(--surface-2); flex-wrap: wrap; align-items: center; }
+.tr-form select, .tr-form input { padding: 4px 7px; border: 1px solid var(--line); border-radius: 5px; font-size: 12px; background: var(--bg); color: var(--text); outline: none; font-family: inherit; }
+.tr-form select:focus, .tr-form input:focus { border-color: var(--craft); }
 .tr-item-inp { flex: 1; min-width: 160px; }
-.tr-btn { background: #7b1fa2; color: #fff; border: none; padding: 5px 14px; border-radius: 5px; cursor: pointer; font-size: 12px; font-weight: 600; }
-.tr-btn:hover { background: #6a1b9a; }
-.tr-err { color: #c62828; font-size: 11px; }
-.tr-side-buy  { color: #1565c0; font-weight: 700; }
-.tr-side-sell { color: #2e7d32; font-weight: 700; }
-.tr-del { background: none; border: none; color: #ccc; cursor: pointer; font-size: 13px; padding: 0 4px; }
-.tr-del:hover { color: #f44336; }
-.pnl-pos { color: #2e7d32; font-weight: 700; }
-.pnl-neg { color: #c62828; font-weight: 700; }
-.pnl-na  { color: #bbb; }
+.tr-btn { background: var(--craft); color: var(--on-accent); border: none; padding: 5px 14px; border-radius: 5px; cursor: pointer; font-size: 12px; font-weight: 700; }
+.tr-btn:hover { filter: brightness(1.1); }
+.tr-err { color: var(--loss); font-size: 11px; }
+.tr-side-buy  { color: var(--buy); font-weight: 700; }
+.tr-side-sell { color: var(--gain); font-weight: 700; }
+.tr-del { background: none; border: none; color: var(--faint); cursor: pointer; font-size: 13px; padding: 0 4px; }
+.tr-del:hover { color: var(--loss); }
+.pnl-pos { color: var(--gain); font-weight: 700; }
+.pnl-neg { color: var(--loss); font-weight: 700; }
+.pnl-na  { color: var(--faint); }
 
-/* Craft arbitrage */
-.craft-block { background: #fff; border: 1px solid #e0ddd8; border-radius: 10px; overflow: hidden; }
-.craft-block .card-header { padding: 8px 13px; font-weight: 700; font-size: 13px; display: flex; align-items: center; gap: 6px; border-bottom: 1px solid #e0ddd8; background: #f3e5f5; color: #4a148c; }
-.craft-note { font-size: 11px; color: #888; padding: 6px 13px; border-bottom: 1px solid #f0f0f0; background: #faf8ff; }
-.headroom-good { color: #2e7d32; font-weight: 700; font-size: 12px; }
-.headroom-ok   { color: #f57c00; font-weight: 700; font-size: 12px; }
-.headroom-low  { color: #bbb; font-size: 12px; }
-.badge-craft { background: #7b1fa2; color: #fff; }
+/* ── Крафт-арбитраж ── */
+.craft-block { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; overflow-x: auto; overflow-y: hidden; }
+.craft-block .card-header { background: var(--craft-bg); color: var(--craft); }
+.craft-note { font-size: 11px; color: var(--faint); padding: 6px 14px; border-bottom: 1px solid var(--line-soft); background: var(--surface-2); }
+.headroom-good { color: var(--gain); font-weight: 700; font-size: 12px; }
+.headroom-ok   { color: var(--flip); font-weight: 700; font-size: 12px; }
+.headroom-low  { color: var(--faint); font-size: 12px; }
+.badge-craft { background: var(--craft); }
 
-/* Uniques */
-.uniq-block .card-header { background: #fde7f3; color: #880e4f; }
-.cat-tab.active-uniq { background: #ad1457; border-color: #ad1457; color: #fff; font-weight: 600; }
+/* ── Уникальные ── */
+.uniq-block .card-header { background: var(--uniq-bg); color: var(--uniq); }
+.cat-tab.active-uniq { background: var(--uniq); border-color: var(--uniq); color: var(--on-accent); font-weight: 700; }
 .uniq-icon { width: 30px; height: 30px; object-fit: contain; flex-shrink: 0; }
 /* единый стиль иконок предметов: object-fit:contain не искажает неквадратные иконки PoE2 */
 .item-ico { width: 26px; height: 26px; object-fit: contain; flex-shrink: 0; vertical-align: middle; }
-.item-ico-ph { display:inline-flex; align-items:center; justify-content:center; background:#2a2a3d; border:1px solid #444; border-radius:4px; color:#666; font-size:11px; box-sizing:border-box; }
+.item-ico-ph { display:inline-flex; align-items:center; justify-content:center; background: var(--surface-2); border:1px dashed var(--line); border-radius:4px; color: var(--faint); font-size:11px; box-sizing:border-box; }
 .name-with-ico { display: flex; align-items: center; gap: 7px; min-width: 0; }
 .name-with-ico > div { min-width: 0; }
-.uniq-name { font-weight: 700; font-size: 12px; color: #880e4f; }
-.uniq-base { font-size: 10px; color: #aaa; }
-.liq-badge { font-size: 10px; padding: 1px 6px; border-radius: 8px; font-weight: 600; white-space: nowrap; }
-.liq-hi { background: #e8f5e9; color: #2e7d32; }
-.liq-md { background: #fff8e1; color: #f57c00; }
-.liq-lo { background: #ffebee; color: #c62828; }
+.uniq-name { font-weight: 700; font-size: 12px; color: var(--uniq); }
+.uniq-base { font-size: 10px; color: var(--faint); }
+.liq-badge { font-size: 10px; padding: 1px 7px; border-radius: 999px; font-weight: 600; white-space: nowrap; }
+.liq-hi { background: var(--gain-bg); color: var(--gain); }
+.liq-md { background: var(--flip-bg); color: var(--flip); }
+.liq-lo { background: var(--loss-bg); color: var(--loss); }
 
-/* Price Check tab (dropdown) */
-.pcx-form { display: flex; gap: 8px; padding: 11px 13px; align-items: center; border-bottom: 1px solid #f0f0f0; background: #fafafa; flex-wrap: wrap; }
-.pcx-form label { font-size: 12px; color: #555; font-weight: 600; }
-.pcx-select { flex: 1; min-width: 240px; max-width: 460px; padding: 6px 9px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px; background: #fff; color: #1a1a2e; outline: none; }
-.pcx-select:focus { border-color: #00897b; }
-.pcx-body { padding: 13px; }
+/* ── Price Check (список) ── */
+.pcx-form { display: flex; gap: 8px; padding: 11px 14px; align-items: center; border-bottom: 1px solid var(--line-soft); background: var(--surface-2); flex-wrap: wrap; }
+.pcx-form label { font-size: 12px; color: var(--muted); font-weight: 600; }
+.pcx-select { flex: 1; min-width: 240px; max-width: 460px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 5px; font-size: 13px; background: var(--bg); color: var(--text); outline: none; font-family: inherit; }
+.pcx-select:focus { border-color: var(--pc); }
+.pcx-body { padding: 14px; }
 .pcx-head { display: flex; align-items: center; gap: 11px; flex-wrap: wrap; margin-bottom: 10px; }
 .pcx-head img { width: 44px; height: 44px; object-fit: contain; }
-.pcx-title { font-size: 16px; font-weight: 700; color: #1a1a2e; }
-.pcx-subtitle { font-size: 11px; color: #999; }
+.pcx-title { font-family: var(--font-serif); font-size: 18px; font-weight: 600; color: var(--text); }
+.pcx-subtitle { font-size: 11px; color: var(--faint); }
 .pcx-prices { display: flex; gap: 10px; flex-wrap: wrap; margin: 6px 0 12px; }
-.pcx-pbox { background: #f5f4f0; border: 1px solid #e0ddd8; border-radius: 8px; padding: 8px 14px; min-width: 92px; }
-.pcx-pbox .lbl { font-size: 10px; color: #888; text-transform: uppercase; letter-spacing: .4px; }
-.pcx-pbox .val { font-size: 17px; font-weight: 700; color: #1a1a2e; }
-.pcx-pbox .unit { font-size: 11px; color: #aaa; font-weight: 400; }
-.pcx-grid { display: grid; grid-template-columns: 1.3fr 1fr; gap: 13px; align-items: start; }
+.pcx-pbox { background: var(--surface-2); border: 1px solid var(--line); border-radius: 6px; padding: 8px 14px; min-width: 92px; }
+.pcx-pbox .lbl { font-size: 11px; color: var(--faint); }
+.pcx-pbox .val { font-size: 17px; font-weight: 700; color: var(--text); }
+.pcx-pbox .unit { font-size: 11px; color: var(--faint); font-weight: 400; }
+.pcx-grid { display: grid; grid-template-columns: 1.3fr 1fr; gap: 14px; align-items: start; }
 @media (max-width: 760px) { .pcx-grid { grid-template-columns: 1fr; } }
-.pcx-chart-card, .pcx-info-card { background: #fff; border: 1px solid #e8e6e1; border-radius: 9px; padding: 11px; }
+.pcx-chart-card, .pcx-info-card { background: var(--surface-2); border: 1px solid var(--line-soft); border-radius: 6px; padding: 11px; }
 .pcx-chart-wrap { height: 210px; position: relative; }
-.pcx-section-h { font-size: 11px; font-weight: 700; color: #555; text-transform: uppercase; letter-spacing: .4px; margin-bottom: 7px; }
-.pcx-mods { font-size: 12px; line-height: 1.5; color: #1a1a2e; }
-.pcx-mod-imp { color: #6a5acd; }
-.pcx-mod-exp { color: #1565c0; }
-.pcx-flavor { font-style: italic; color: #999; font-size: 11px; margin-top: 7px; white-space: pre-line; }
-.pcx-prop { font-size: 11px; color: #777; }
+.pcx-section-h { font-size: 12px; font-weight: 700; color: var(--muted); margin-bottom: 7px; }
+.pcx-mods { font-size: 12px; line-height: 1.5; color: var(--text); }
+.pcx-mod-imp { color: var(--craft); }
+.pcx-mod-exp { color: var(--buy); }
+.pcx-flavor { font-style: italic; color: var(--faint); font-size: 11px; margin-top: 7px; white-space: pre-line; }
+.pcx-prop { font-size: 11px; color: var(--muted); }
 .pcx-stat-grid { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; font-size: 11px; margin-top: 4px; }
-.pcx-stat-grid .k { color: #999; }
-.pcx-stat-grid .v { color: #333; font-weight: 600; }
+.pcx-stat-grid .k { color: var(--faint); }
+.pcx-stat-grid .v { color: var(--text); font-weight: 600; }
+a { color: var(--buy); }
 </style>
 </head>
 <body>
 <div class="header">
   <div>
     <div class="header-title" id="brand">⚔️ PoE Market · <span id="brand-league">…</span></div>
-    <div id="updated" style="font-size:10px;color:#9090a8;margin-top:1px;">Загружается...</div>
+    <div id="updated" style="font-size:10px;margin-top:1px;">Загружается...</div>
   </div>
   <div class="header-right">
     <div class="budget-wrap" title="Игра и лига (данные poe2scout)">
@@ -285,6 +354,7 @@ th.sort:hover { color: #333; }
     </div>
     <span class="divine-rate-label" id="rate-label">…</span>
     <button class="btn-refresh" onclick="loadAll()">↺ Обновить</button>
+    <button class="btn-refresh" id="theme-btn" onclick="toggleTheme()" title="Переключить тему" aria-label="Переключить тему">☀</button>
   </div>
 </div>
 
@@ -292,6 +362,24 @@ th.sort:hover { color: #333; }
   <div class="loading"><div class="spinner"></div><br>Загружаем данные с poe2scout...</div>
 </div>
 
+<script>
+/* ── Тема: dark по умолчанию, выбор хранится в localStorage ── */
+function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || '#888'; }
+function syncThemeBtn() {
+  const b = document.getElementById('theme-btn'); if (!b) return;
+  const dark = document.documentElement.getAttribute('data-theme') !== 'light';
+  b.textContent = dark ? '☀' : '☾';
+  b.title = dark ? 'Включить светлую тему' : 'Включить тёмную тему';
+}
+function toggleTheme() {
+  const next = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+  document.documentElement.setAttribute('data-theme', next);
+  try { localStorage.setItem('poe2_theme', next); } catch (e) {}
+  syncThemeBtn();
+  if (typeof pcxCurrent !== 'undefined' && pcxCurrent && document.getElementById('pcx-canvas')) drawPcxChart(pcxCurrent);
+}
+document.addEventListener('DOMContentLoaded', syncThemeBtn);
+</script>
 <script>
 // Реалмы poe2scout. nativeApi — в чём API реально отдаёт CurrentPrice (менять нельзя, это факт API).
 // baseApi — рабочая валюта расчётов/бюджета (её МОЖНО менять); если она не совпадает с nativeApi,
@@ -733,8 +821,8 @@ function renderRates(items) {
     const ex = it.CurrentPrice;
     return `<div class="rate-item">
       <div class="r-name" title="${it.Text}" style="display:flex;align-items:center;gap:5px">${icoImg(it.IconUrl,18)}<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${it.Text}</span></div>
-      <div class="r-val">${toDiv(ex).toFixed(ex < divinePrice ? 3 : 2)}<span style="font-size:10px;color:#aaa"> div</span></div>
-      <div style="font-size:10px;color:#888">${ex.toFixed(ex < 10 ? 2 : 1)} ${U_BASE} · ${toC(ex).toFixed(1)} ${U_MID}</div>
+      <div class="r-val">${toDiv(ex).toFixed(ex < divinePrice ? 3 : 2)}<span style="font-size:10px;color:var(--faint)"> div</span></div>
+      <div style="font-size:10px;color:var(--faint)">${ex.toFixed(ex < 10 ? 2 : 1)} ${U_BASE} · ${toC(ex).toFixed(1)} ${U_MID}</div>
       <div class="r-change"><span class="${cls}">${t!==null?arr+' '+Math.abs(t).toFixed(0)+'%':''}</span></div>
     </div>`;
   }).join('');
@@ -823,14 +911,14 @@ function renderCraftBlock(runesItems, fragmentsItems, incursionItems) {
             </div>
           </td>
           <td><div class="price-now">${pDiv}</div></td>
-          <td><div style="font-size:11px;color:#555;max-width:220px">${r.recipe}</div></td>
+          <td><div style="font-size:11px;color:var(--muted);max-width:220px">${r.recipe}</div></td>
           <td><div class="${cls}">${profDiv}</div></td>
           <td><span class="${cls}">${pct}%</span></td>
           <td><div class="item-cat">${r.note}</div></td>
         </tr>`;
       }).join('');
     sections.push(`
-      <div style="padding:6px 13px 4px;font-size:11px;font-weight:700;color:#4a148c;border-bottom:1px solid #f0f0f0;background:#faf8ff">
+      <div style="padding:6px 13px 4px;font-size:11px;font-weight:700;color:var(--craft);border-bottom:1px solid var(--line-soft);background:var(--surface-2)">
         🧩 Фрагменты — собираем из частей
       </div>
       <div style="overflow-x:auto"><table><thead>${hdr}</thead><tbody>${rows}</tbody></table></div>`);
@@ -860,21 +948,21 @@ function renderCraftBlock(runesItems, fragmentsItems, incursionItems) {
         .split('-').map(w=>w[0].toUpperCase()+w.slice(1)).join(' ');
       const headroomStr = it.headroom > 0
         ? `<div class="${hCls}">${fmtD(it.headroom)}</div><div class="bid-sub">breakeven для Greater</div>`
-        : `<div style="color:#f44336;font-weight:700;font-size:12px">убыток без Greater</div>`;
+        : `<div style="color:var(--loss);font-weight:700;font-size:12px">убыток без Greater</div>`;
       return `<tr>
         <td><span class="rank ${i<3?'top3':''}">${i+1}</span></td>
         <td><div class="name-with-ico">${icoImg(it.IconUrl)}<div><div class="item-name">${it.Text}</div><div class="item-cat">Greater ${baseName} Rune (в предмет) → Masterwork → Orb</div></div></div></td>
         <td><div class="price-now">${fmtD(it.CurrentPrice)}</div></td>
-        <td><div style="color:#7b1fa2;font-weight:700;font-size:12px">${mwDiv}</div></td>
-        <td><div style="color:#5c1a9e;font-weight:700;font-size:12px">${orbDiv}</div></td>
+        <td><div style="color:var(--craft);font-weight:700;font-size:12px">${mwDiv}</div></td>
+        <td><div style="color:var(--craft);font-weight:700;font-size:12px">${orbDiv}</div></td>
         <td>${headroomStr}</td>
         <td><span class="${hCls}">${profitIfFree > 0 ? fmtD(profitIfFree) : '—'}</span></td>
       </tr>`;
     }).join('');
     sections.push(`
-      <div style="padding:6px 13px 4px;font-size:11px;font-weight:700;color:#4a148c;border-bottom:1px solid #f0f0f0;background:#faf8ff;${fragRecipes.length?'border-top:1px solid #e0d5ff':''}">
+      <div style="padding:6px 13px 4px;font-size:11px;font-weight:700;color:var(--craft);border-bottom:1px solid var(--line-soft);background:var(--surface-2);${fragRecipes.length?'border-top:1px solid var(--line)':''}">
         💎 Perfect Runes — Greater Rune (в предмет) + Masterwork Rune + Orb of Extraction
-        <span style="font-weight:400;color:#888"> · MW: ${mwDiv} · Orb: ${orbDiv} · Итого без Greater: ${knownDiv} · цена Greater — <a href="https://www.pathofexile.com/trade2" target="_blank" style="color:#7b1fa2">trade</a></span>
+        <span style="font-weight:400;color:var(--faint)"> · MW: ${mwDiv} · Orb: ${orbDiv} · Итого без Greater: ${knownDiv} · цена Greater — <a href="https://www.pathofexile.com/trade2" target="_blank" style="color:var(--craft)">trade</a></span>
       </div>
       <div style="overflow-x:auto"><table><thead>${hdr2}</thead><tbody>${rows2}</tbody></table></div>`);
   }
@@ -993,7 +1081,7 @@ function renderPortfolio() {
   const investProfit = investAlloc.reduce((s,r) => s + r.profitEx, 0);
 
   function pfRows(alloc, mode) {
-    if (!alloc.length) return '<div class="pf-row" style="color:#aaa;font-size:11px;padding:12px 13px">Нет подходящих позиций в рамках бюджета</div>';
+    if (!alloc.length) return '<div class="pf-row" style="color:var(--faint);font-size:11px;padding:12px 13px">Нет подходящих позиций в рамках бюджета</div>';
     const modeLabel = mode === 'flip' ? 'продажа' : 'цель +3д';
     return alloc.map((r,i) => {
       const profEx = r.profitEx; // qty уже учтён — НЕ умножать ещё раз
@@ -1005,8 +1093,8 @@ function renderPortfolio() {
         ${icoImg(r.it.IconUrl)}
         <div class="pf-info">
           <div class="pf-name" title="${r.it.Text}">${r.it.Text}</div>
-          <div class="pf-detail" style="color:#1565c0;font-weight:600">закупка: ${r.qty} шт за ${r.buyTot} ${cur.label} (≈${unitBuyEx.toFixed(0)} ${U_BASE}/шт)</div>
-          <div class="pf-detail" style="color:#2e7d32">${modeLabel}: ${r.qty} шт за ${r.sellTot} ${cur.label} (≈${unitSellEx.toFixed(0)} ${U_BASE}/шт)</div>
+          <div class="pf-detail" style="color:var(--buy);font-weight:600">закупка: ${r.qty} шт за ${r.buyTot} ${cur.label} (≈${unitBuyEx.toFixed(0)} ${U_BASE}/шт)</div>
+          <div class="pf-detail" style="color:var(--gain)">${modeLabel}: ${r.qty} шт за ${r.sellTot} ${cur.label} (≈${unitSellEx.toFixed(0)} ${U_BASE}/шт)</div>
           <div class="pf-detail">итого закупка: ${fmtD(r.costEx, 1)} ≈ ${fmtC(r.costEx, 0)}${r.gridWarn ? ' <span class="grid-warn">⚠ шаг цены в ' + cur.label + ' крупнее маржи — продажа округлена вверх</span>' : ''}</div>
         </div>
         <div class="pf-alloc">
@@ -1025,7 +1113,7 @@ function renderPortfolio() {
       <input class="pf-slider" type="range" min="0" max="100" step="10" value="${pfSplit}"
         oninput="setPfSplit(this.value)">
       <span class="pf-invest-lbl">${100-pfSplit}% Инвест</span>
-      <span style="font-size:10px;color:#bbb;margin-left:4px">
+      <span style="font-size:10px;color:var(--faint);margin-left:4px">
         (${toDiv(flipBudEx).toFixed(1)} div / ${toDiv(investBudEx).toFixed(1)} div)
       </span>
       <span style="margin-left:auto;display:flex;align-items:center;gap:4px">
@@ -1040,9 +1128,9 @@ function renderPortfolio() {
     <div class="pf-summary">
       <div class="pf-summary-item">💸 Флип потратить: <span>${toDiv(flipSpent).toFixed(2)} div · ${fmtC(flipSpent, 0)}</span></div>
       <div class="pf-summary-item">📦 Инвест потратить: <span>${toDiv(investSpent).toFixed(2)} div · ${fmtC(investSpent, 0)}</span></div>
-      <div class="pf-summary-item">🔄 Ожид. прибыль флип: <span style="color:#e65100">+${toDiv(flipProfit).toFixed(2)} div (${fmtC(flipProfit, 0)})</span></div>
-      <div class="pf-summary-item">📈 Ожид. прибыль инвест: <span style="color:#2e7d32">+${toDiv(investProfit).toFixed(2)} div (${fmtC(investProfit, 0)})</span></div>
-      <div class="pf-summary-item">✨ Итого ожид.: <span style="color:#c9a84c">+${toDiv(flipProfit+investProfit).toFixed(2)} div (${fmtC(flipProfit+investProfit, 0)})</span></div>
+      <div class="pf-summary-item">🔄 Ожид. прибыль флип: <span style="color:var(--flip)">+${toDiv(flipProfit).toFixed(2)} div (${fmtC(flipProfit, 0)})</span></div>
+      <div class="pf-summary-item">📈 Ожид. прибыль инвест: <span style="color:var(--gain)">+${toDiv(investProfit).toFixed(2)} div (${fmtC(investProfit, 0)})</span></div>
+      <div class="pf-summary-item">✨ Итого ожид.: <span style="color:var(--gold)">+${toDiv(flipProfit+investProfit).toFixed(2)} div (${fmtC(flipProfit+investProfit, 0)})</span></div>
       <div class="pf-summary-item">💤 Остаток: <span>${toDiv(leftoverEx).toFixed(2)} div · ${fmtC(leftoverEx, 0)}</span></div>
     </div>`;
 
@@ -1151,7 +1239,7 @@ function renderTracker(keepItem) {
 
   // ── журнал ──
   const logRows = [...trades].reverse().map(t => `<tr>
-    <td style="white-space:nowrap;color:#aaa;font-size:11px">${t.ts}</td>
+    <td style="white-space:nowrap;color:var(--faint);font-size:11px">${t.ts}</td>
     <td><span class="${t.side==='buy'?'tr-side-buy':'tr-side-sell'}">${t.side==='buy'?'Покупка':'Продажа'}</span></td>
     <td><div class="name-with-ico">${icoByName(t.item)}<div class="item-name">${t.item}</div></div></td>
     <td>${t.qty} шт</td>
@@ -1187,7 +1275,7 @@ function renderTracker(keepItem) {
       <span class="tr-err" id="tr-err"></span>
     </div>
     ${sumRows ? `<div style="overflow-x:auto"><table><thead><tr><th>Предмет</th><th>Куплено</th><th>Продано</th><th>Остаток</th><th>Реализ. P&L</th><th>Нереализ. P&L</th></tr></thead><tbody>${sumRows}</tbody></table></div>` : ''}
-    ${logRows ? `<div style="overflow-x:auto;border-top:1px solid #f0f0f0"><table><thead><tr><th>Когда</th><th>Тип</th><th>Предмет</th><th>Кол-во</th><th>Цена/шт</th><th>Сумма</th><th></th></tr></thead><tbody>${logRows}</tbody></table></div>`
+    ${logRows ? `<div style="overflow-x:auto;border-top:1px solid var(--line-soft)"><table><thead><tr><th>Когда</th><th>Тип</th><th>Предмет</th><th>Кол-во</th><th>Цена/шт</th><th>Сумма</th><th></th></tr></thead><tbody>${logRows}</tbody></table></div>`
                 : '<div class="no-data">Сделок пока нет — запиши первую покупку или продажу</div>'}
     ${summaryBar}`;
 }
@@ -1349,8 +1437,8 @@ function pcEvaluate() {
       <div class="pc-price-box"><div class="lbl">стак (${qty} шт)</div><div class="val">${stack.toFixed(0)} ${U_BASE}</div><div class="bid-sub">${toDiv(stack).toFixed(2)} div · ${toC(stack).toFixed(0)} ${U_MID}</div></div>
     </div>
     ${a.reasons.map(r => `<div class="pc-reason">${r}</div>`).join('')}
-    <div class="pc-reason" style="color:#aaa;margin-top:4px">Оценка по 3-дневной динамике poe2scout; патчи, анонсы и конец лиги не учитываются.</div>
-    <div class="pc-reason" style="color:#2e7d32;margin-top:6px;font-weight:600">✓ автоматически добавлено в Stash ниже</div>
+    <div class="pc-reason" style="color:var(--faint);margin-top:4px">Оценка по 3-дневной динамике poe2scout; патчи, анонсы и конец лиги не учитываются.</div>
+    <div class="pc-reason" style="color:var(--gain);margin-top:6px;font-weight:600">✓ автоматически добавлено в Stash ниже</div>
     <button class="tr-btn" style="margin-top:6px" onclick="stashAdd()">↻ Обновить кол-во в Stash</button>
   </div>`;
   stashAdd(); // авто-добавление в стеш после вставки из буфера
@@ -1433,9 +1521,9 @@ function renderStash() {
   const rows = data.map(({ x, unit, now, d, a }) => {
     const expanded = stashExpanded.has(x.id);
     const hoverTitle = a ? a.reasons.join('&#10;') : 'нет данных по предмету';
-    const detailRow = expanded && a ? `<tr><td colspan="7" style="background:#faf8ff;padding:8px 16px">
+    const detailRow = expanded && a ? `<tr><td colspan="7" style="background:var(--surface-2);padding:8px 16px">
         ${a.reasons.map(r => `<div class="pc-reason">${r}</div>`).join('')}
-        <div class="pc-reason" style="color:#aaa">Оценка по 3-дневной динамике poe2scout.</div>
+        <div class="pc-reason" style="color:var(--faint)">Оценка по 3-дневной динамике poe2scout.</div>
       </td></tr>` : '';
     return `<tr>
       <td class="sort" onclick="stashToggle(${x.id})" title="${hoverTitle}">
@@ -1509,7 +1597,7 @@ function renderUniqTable() {
         <div><div class="uniq-name">${it.Name || it.Text}</div><div class="uniq-base">${base}</div></div>
       </div></td>
       <td><div class="price-now">${toDiv(it.CurrentPrice).toFixed(toDiv(it.CurrentPrice)<10?2:0)} div</div></td>
-      <td><div class="bid-sub" style="color:#888">${it.CurrentPrice.toFixed(0)} ${U_BASE} · ${toC(it.CurrentPrice).toFixed(0)} ${U_MID}</div></td>
+      <td><div class="bid-sub" style="color:var(--faint)">${it.CurrentPrice.toFixed(0)} ${U_BASE} · ${toC(it.CurrentPrice).toFixed(0)} ${U_MID}</div></td>
       <td><span class="liq-badge ${liq.cls}">${liq.label}</span></td>
       <td>${trendEl(t7)}</td>
       <td><button class="cur-btn" style="font-size:10px" onclick="pcxOpen('${(it.Text||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}')">📊 разбор</button></td>
@@ -1581,7 +1669,7 @@ function pcxDescribe(it) {
   if (!isUniqueItem(it)) {
     // валюта / расходник: у ItemMetadata есть description / effect / стак
     const eff = (m.effect || []).map(x => `<div class="pcx-mod-exp">${x}</div>`).join('');
-    const desc = m.description ? `<div class="pcx-prop" style="margin-top:5px;color:#555">${m.description}</div>` : '';
+    const desc = m.description ? `<div class="pcx-prop" style="margin-top:5px;color:var(--muted)">${m.description}</div>` : '';
     const stack = m.max_stack_size ? `<div class="pcx-prop">Макс. размер стака: <b>${m.max_stack_size}</b></div>` : '';
     return `<div class="pcx-info-card">
       <div class="pcx-section-h">Описание</div>
@@ -1590,7 +1678,7 @@ function pcxDescribe(it) {
     </div>`;
   }
   const props = m.properties ? Object.entries(m.properties)
-    .map(([k,v]) => v===null ? `<div class="pcx-prop" style="font-weight:700;color:#555">${k}</div>` : `<div class="k">${k}</div><div class="v">${v}</div>`) : [];
+    .map(([k,v]) => v===null ? `<div class="pcx-prop" style="font-weight:700;color:var(--muted)">${k}</div>` : `<div class="k">${k}</div><div class="v">${v}</div>`) : [];
   const propGrid = props.length ? `<div class="pcx-stat-grid">${props.join('')}</div>` : '';
   const imp = (m.implicit_mods||[]).map(x => `<div class="pcx-mod-imp">${x}</div>`).join('');
   const exp = (m.explicit_mods||[]).map(x => `<div class="pcx-mod-exp">${x}</div>`).join('');
@@ -1638,8 +1726,8 @@ function renderPcx(it) {
       <div style="display:flex;flex-direction:column;gap:13px">
         <div class="pcx-info-card">
           <div class="pcx-section-h">Аналитика и рекомендация</div>
-          ${a.reasons.map(r => `<div class="pc-reason">${r}</div>`).join('') || '<div class="pc-reason" style="color:#aaa">Недостаточно истории для сигналов.</div>'}
-          <div class="pc-reason" style="color:#aaa;margin-top:5px">Оценка по 3-дневной динамике poe2scout; патчи, анонсы и конец лиги не учитываются.</div>
+          ${a.reasons.map(r => `<div class="pc-reason">${r}</div>`).join('') || '<div class="pc-reason" style="color:var(--faint)">Недостаточно истории для сигналов.</div>'}
+          <div class="pc-reason" style="color:var(--faint);margin-top:5px">Оценка по 3-дневной динамике poe2scout; патчи, анонсы и конец лиги не учитываются.</div>
         </div>
         ${pcxDescribe(it)}
       </div>
@@ -1662,7 +1750,7 @@ function drawPcxChart(it) {
     const w = 320, h = 200, pad = 6;
     const mn = Math.min(...data), mx = Math.max(...data), rng = mx - mn || 1;
     const pts = data.map((v,i) => `${pad + i*(w-2*pad)/(Math.max(1,data.length-1))},${h-pad-(v-mn)/rng*(h-2*pad)}`).join(' ');
-    canvas.parentElement.innerHTML = `<svg viewBox="0 0 ${w} ${h}" style="width:100%;height:100%"><polyline points="${pts}" fill="none" stroke="#ad1457" stroke-width="2"/></svg>
+    canvas.parentElement.innerHTML = `<svg viewBox="0 0 ${w} ${h}" style="width:100%;height:100%;color:var(--uniq)"><polyline points="${pts}" fill="none" stroke="currentColor" stroke-width="2"/></svg>
       <div class="pcx-prop" style="text-align:center">${mn.toFixed(2)}–${mx.toFixed(2)} div</div>`;
     return;
   }
@@ -1670,17 +1758,17 @@ function drawPcxChart(it) {
     type: 'line',
     data: { labels, datasets: [{
       label: 'div', data,
-      borderColor: '#ad1457', backgroundColor: 'rgba(173,20,87,.10)',
+      borderColor: cssVar('--uniq'), backgroundColor: cssVar('--uniq') + '1a',
       borderWidth: 2, fill: true, tension: .25,
-      pointRadius: 2, pointHoverRadius: 5, pointBackgroundColor: '#ad1457',
+      pointRadius: 2, pointHoverRadius: 5, pointBackgroundColor: cssVar('--uniq'),
     }]},
     options: {
       responsive: true, maintainAspectRatio: false,
       plugins: { legend: { display: false },
         tooltip: { callbacks: { label: c => `${c.parsed.y} div · ${(c.parsed.y*divinePrice).toFixed(0)} ${U_BASE}` } } },
       scales: {
-        y: { ticks: { font: { size: 10 }, callback: v => v + ' div' }, grid: { color: '#f0f0f0' } },
-        x: { ticks: { font: { size: 10 }, maxRotation: 0, autoSkip: true }, grid: { display: false } },
+        y: { ticks: { font: { size: 10 }, color: cssVar('--faint'), callback: v => v + ' div' }, grid: { color: cssVar('--line-soft') }, border: { display: false } },
+        x: { ticks: { font: { size: 10 }, color: cssVar('--faint'), maxRotation: 0, autoSkip: true }, grid: { display: false } },
       },
     },
   });
@@ -1832,7 +1920,7 @@ async function loadSnapshotData(realm, league) {
       // нужной лиги нет в кэше (сменилась/название другое) — берём другую закэшированную
       // лигу этого реалма; если их несколько (SC+HC), по умолчанию предпочитаем SC
       const keys = Object.keys(snaps).filter(k => k.startsWith(realm + '|'));
-      key = keys.find(k => !/^HC /i.test(k.slice(realm.length + 1))) || keys[0];
+      key = keys.find(k => !/^(HC|Hardcore) /i.test(k.slice(realm.length + 1))) || keys[0];
       snap = key ? snaps[key] : null;
     }
     if (!snap) return null;
@@ -1847,12 +1935,12 @@ async function loadSnapshotData(realm, league) {
   if (sessionStorage.getItem('poe2_auth') === '1') return;
   const ov = document.createElement('div');
   ov.id = 'pw-overlay';
-  ov.style.cssText = 'position:fixed;inset:0;background:linear-gradient(135deg,#1a1a2e,#16213e);z-index:9999;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px';
+  ov.style.cssText = 'position:fixed;inset:0;background:#0d1020;z-index:9999;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px';
   ov.innerHTML = `
-    <div style="color:#c9a84c;font-size:20px;font-weight:700">⚔️ PoE Market · poe2scout</div>
+    <div style="color:var(--gold);font-family:var(--font-serif);font-size:22px;font-weight:700">⚔️ PoE Market · poe2scout</div>
     <input id="pw-inp" type="password" placeholder="пароль" autocomplete="off"
-      style="padding:9px 14px;border-radius:8px;border:1px solid #c9a84c55;background:#ffffff12;color:#ffd700;outline:none;text-align:center;font-size:15px">
-    <div id="pw-err" style="color:#f44336;font-size:12px;height:15px"></div>`;
+      style="padding:9px 14px;border-radius:8px;border:1px solid #d8b45f66;background:#ffffff0d;color:#f2cf79;outline:none;text-align:center;font-size:15px;font-family:inherit">
+    <div id="pw-err" style="color:var(--loss);font-size:12px;height:15px"></div>`;
   document.body.appendChild(ov);
   const inp = ov.querySelector('#pw-inp');
   inp.addEventListener('keydown', e => {
@@ -2053,10 +2141,10 @@ function renderMarket(cats, uniqCats, byCategory, uniquesIn, league, categoriesR
       </div>
       <div id="tab-help" style="display:${mainTab==='help'?'':'none'}">
         <div class="content">
-          <div class="card"><div class="card-header" style="background:#e8eaf6;color:#283593">📖 Как пользоваться дашбордом</div>
-          <div style="padding:14px 16px;font-size:13px;line-height:1.55;color:#333">
+          <div class="card"><div class="card-header" style="background:var(--buy-bg);color:var(--buy)">📖 Как пользоваться дашбордом</div>
+          <div style="padding:14px 16px;font-size:13px;line-height:1.55;color:var(--text)">
 
-            <p><b>Источник данных и переключение игр/лиг.</b> Все цены — с poe2scout.com. Селектор 🎮 в шапке переключает игру (⚔️ PoE 2 / 🏛️ PoE 1 PC) и лигу — данные и набор категорий перезагружаются под выбранный реалм, выбор запоминается отдельно для каждой игры. Базовая валюта зависит от игры: в PoE 2 это Exalted, в PoE 1 — Chaos; подписи единиц в шапке и таблицах меняются автоматически (вторая единица — Chaos в PoE 2 и Exalted в PoE 1). В PoE 1 нет уникалов и крафт-арбитража на poe2scout, поэтому эти блоки скрыты. История — дневные средние за 7 дней плюс живая текущая цена. Обновление — кнопкой «↺ Обновить» или Reload в шапке артефакта.</p>
+            <p><b>Источник данных и переключение игр/лиг.</b> Все цены — с poe2scout.com. Селектор 🎮 в шапке переключает игру (⚔️ PoE 2 / 🏛️ PoE 1 PC) и лигу — данные и набор категорий перезагружаются под выбранный реалм, выбор запоминается отдельно для каждой игры. Рабочая валюта (бюджет, ставки, портфель) — Chaos; вторая единица — Exalted. В PoE 2 API отдаёт цены в Exalted, поэтому при загрузке они один раз пересчитываются в Chaos; в PoE 1 цены уже в Chaos. В PoE 1 нет уникалов и крафт-арбитража на poe2scout, поэтому эти блоки скрыты. История — дневные средние за 7 дней плюс живая текущая цена. Обновление — кнопкой «↺ Обновить» или Reload в шапке артефакта.</p>
 
             <p style="margin-top:10px"><b>📦 Свой стеш и журнал.</b> У каждой связки <b>игра + лига + профиль</b> свой Stash и свой журнал сделок — при переключении игры/лиги/профиля показываются именно их записи. Старые данные перенесены в PoE 2 / Runes of Aldur.</p>
 
@@ -2089,19 +2177,19 @@ function renderMarket(cats, uniqCats, byCategory, uniquesIn, league, categoriesR
       <div id="tab-price" style="display:${mainTab==='price'?'':'none'}">
         <div class="content">
           <div class="card">
-            <div class="card-header coll" style="background:#e0f2f1;color:#00695c" onclick="toggleSec('pc')">${chev('pc')}📋 Оценка из буфера <span class="badge" style="background:#00897b;color:#fff;margin-left:auto">Ctrl+C → авто-Stash</span></div>
+            <div class="card-header coll" style="background:var(--pc-bg);color:var(--pc)" onclick="toggleSec('pc')">${chev('pc')}📋 Оценка из буфера <span class="badge" style="background:var(--pc);color:var(--on-accent);margin-left:auto">Ctrl+C → авто-Stash</span></div>
             <div id="sec-pc" style="${secStyle('pc')}">
             <div class="pc-form">
               <textarea id="pc-input" onpaste="setTimeout(pcEvaluate, 60)" placeholder="Кликни сюда и нажми Ctrl+V — оценка запустится сама&#10;&#10;Item Class: Stackable Currency&#10;Rarity: Currency&#10;Greater Chaos Orb&#10;--------&#10;Stack Size: 18/20&#10;..."></textarea>
               <div style="display:flex;flex-direction:column;gap:6px">
-                <button class="tr-btn" style="background:#00897b" onclick="pcPaste()">📋 Из буфера</button>
+                <button class="tr-btn" style="background:var(--pc)" onclick="pcPaste()">📋 Из буфера</button>
               </div>
             </div>
             <div id="pc-result"></div>
             </div>
           </div>
           <div class="card">
-            <div class="card-header coll" style="background:#fff3e0;color:#e65100" onclick="toggleSec('stash')">${chev('stash')}📦 Stash <span class="badge" style="background:#ff9800;color:#fff;margin-left:auto" id="stash-count"></span></div>
+            <div class="card-header coll" style="background:var(--flip-bg);color:var(--flip)" onclick="toggleSec('stash')">${chev('stash')}📦 Stash <span class="badge" style="background:var(--flip);color:var(--on-accent);margin-left:auto" id="stash-count"></span></div>
             <div id="sec-stash" style="${secStyle('stash')}"><div id="pc-stash"></div></div>
           </div>
         </div>
@@ -2109,7 +2197,7 @@ function renderMarket(cats, uniqCats, byCategory, uniquesIn, league, categoriesR
       <div id="tab-pricecheck" style="display:${mainTab==='pricecheck'?'':'none'}">
         <div class="content">
           <div class="card">
-            <div class="card-header" style="background:#fce4ec;color:#880e4f">🔎 Price Check <span class="badge" style="background:#ad1457;color:#fff;margin-left:auto">курс · история · аналитика</span></div>
+            <div class="card-header" style="background:var(--uniq-bg);color:var(--uniq)">🔎 Price Check <span class="badge" style="background:var(--uniq);color:var(--on-accent);margin-left:auto">курс · история · аналитика</span></div>
             <div class="pcx-form">
               <label>Предмет:</label>
               <input id="pcx-input" list="pcx-dl" class="pcx-select" autocomplete="off" placeholder="начни вводить любую часть названия — валюта, расходники, уникалы…" oninput="pcxInput()" onchange="pcxInput()">
@@ -2127,11 +2215,11 @@ function renderMarket(cats, uniqCats, byCategory, uniquesIn, league, categoriesR
           <div id="sec-rates" style="${secStyle('rates')}"><div class="rates-grid">${renderRates(currency)}</div></div>
         </div>
         <div class="portfolio-block">
-          <div class="card-header coll" onclick="toggleSec('portfolio')">${chev('portfolio')}💼 Рекомендованный портфель <span class="badge" style="background:#c9a84c;color:#1a1a2e;margin-left:auto">AI</span></div>
+          <div class="card-header coll" onclick="toggleSec('portfolio')">${chev('portfolio')}💼 Рекомендованный портфель <span class="badge" style="background:var(--gold);color:var(--on-accent);margin-left:auto">AI</span></div>
           <div id="sec-portfolio" style="${secStyle('portfolio')}"><div id="portfolio-content"></div></div>
         </div>
         <div class="tracker-block">
-          <div class="card-header coll" onclick="toggleSec('tracker')">${chev('tracker')}📒 Журнал сделок <span class="badge" style="background:#7b1fa2;color:#fff;margin-left:auto">P&L</span></div>
+          <div class="card-header coll" onclick="toggleSec('tracker')">${chev('tracker')}📒 Журнал сделок <span class="badge" style="background:var(--craft);color:var(--on-accent);margin-left:auto">P&L</span></div>
           <div id="sec-tracker" style="${secStyle('tracker')}"><div id="tracker-content"></div></div>
           <datalist id="items-dl">${Object.keys(marketByText).sort().map(n => `<option value="${n.replace(/"/g,'&quot;')}">`).join('')}</datalist>
         </div>
@@ -2153,7 +2241,7 @@ function renderMarket(cats, uniqCats, byCategory, uniquesIn, league, categoriesR
         </div>
         ${REALM === 'poe2' ? renderCraftBlock(runesItems, fragmentsItems, incursionItems) : ''}
         ${uniqCats.length ? `<div class="card uniq-block">
-          <div class="card-header coll" onclick="toggleSec('uniq')">${chev('uniq')}⭐ Уникальные предметы <span class="badge" style="background:#ad1457;color:#fff;margin-left:auto">${allUniques.length}</span></div>
+          <div class="card-header coll" onclick="toggleSec('uniq')">${chev('uniq')}⭐ Уникальные предметы <span class="badge" style="background:var(--uniq);color:var(--on-accent);margin-left:auto">${allUniques.length}</span></div>
           <div id="sec-uniq" style="${secStyle('uniq')}">
             <div class="craft-note">Топ-20 по цене в категории. Цена в base-валюте; маленькая ликвидность = ненадёжная цена (часто 1–3 тролльных листинга). «📊 разбор» открывает Price Check.</div>
             <div class="cat-tabs" id="uniq-tabs">${uniqTabsHtml()}</div>
