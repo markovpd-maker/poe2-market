@@ -319,6 +319,9 @@ th.sort:hover { color: var(--text); }
 .pcx-stat-grid { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; font-size: 11px; margin-top: 4px; }
 .pcx-stat-grid .k { color: var(--faint); }
 .pcx-stat-grid .v { color: var(--text); font-weight: 600; }
+.toolbar { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
+.toolbar select { background: var(--surface-2); color: var(--text); border: 1px solid var(--line); border-radius: 5px; padding: 3px 8px; font-size: 12px; font-family: inherit; }
+.toolbar-hint { color: var(--faint); }
 a { color: var(--buy); }
 </style>
 </head>
@@ -353,7 +356,7 @@ a { color: var(--buy); }
       <span class="budget-unit" id="u-mid">c</span>
     </div>
     <span class="divine-rate-label" id="rate-label">…</span>
-    <button class="btn-refresh" onclick="loadAll()">↺ Обновить</button>
+    <button class="btn-refresh" onclick="refreshAll()">↺ Обновить</button>
     <button class="btn-refresh" id="theme-btn" onclick="toggleTheme()" title="Переключить тему" aria-label="Переключить тему">☀</button>
   </div>
 </div>
@@ -434,6 +437,18 @@ function buildCategories(resp) {
   if (!uks.includes(uniqCat)) uniqCat = uks[0] || 'weapon';
 }
 
+/* Одноразово: слоты «ex»/«c» поменялись смыслом (раньше ex = exalted, c = chaos; теперь ex-слот = chaos,
+   c-слот = exalted). Сохранённые суммы бюджета и выбор валюты ордеров переносим в соответствующие слоты. */
+(function migrateCurrencySlots() {
+  try {
+    if (localStorage.getItem('poe2_slots_v2')) return;
+    const a = localStorage.getItem('poe2_budget_ex'), b = localStorage.getItem('poe2_budget_c');
+    if (a !== null || b !== null) { localStorage.setItem('poe2_budget_ex', b || ''); localStorage.setItem('poe2_budget_c', a || ''); }
+    const pc = localStorage.getItem('poe2_pf_cur');
+    if (pc === 'ex') localStorage.setItem('poe2_pf_cur', 'c'); else if (pc === 'c') localStorage.setItem('poe2_pf_cur', 'ex');
+    localStorage.setItem('poe2_slots_v2', '1');
+  } catch (e) {}
+})();
 const budgetEl   = document.getElementById('budget');
 const budgetExEl = document.getElementById('budget-ex');
 const budgetCEl  = document.getElementById('budget-c');
@@ -545,6 +560,7 @@ function deleteProfile() {
    Если рабочая валюта (baseApi) от неё отличается — пересчитываем ВСЕ цены и
    PriceLogs один раз сразу после загрузки, дальше по коду ничего не меняется:
    вся математика (флип/инвест/бюджет) как и раньше просто оперирует числом в U_BASE. */
+const REBASED = new WeakSet(); // объекты, уже пересчитанные в рабочую валюту (кэш data.json / ответы API переиспользуются между отрисовками)
 function rebaseToWorkUnit(byCategory, uniques, realmCfg) {
   if (realmCfg.baseApi === realmCfg.nativeApi) return; // уже в рабочей валюте, пересчёт не нужен
   const allCur = Object.values(byCategory).flat().filter(Boolean);
@@ -553,9 +569,11 @@ function rebaseToWorkUnit(byCategory, uniques, realmCfg) {
     console.warn('rebaseToWorkUnit: валюта', realmCfg.baseApi, 'не найдена в данных — пересчёт пропущен');
     return;
   }
+  if (REBASED.has(baseItem)) return; // этот набор уже пересчитан
   const factor = 1 / baseItem.CurrentPrice; // native → work (например exalted → chaos)
   const scale = it => {
-    if (!it) return;
+    if (!it || REBASED.has(it)) return;
+    REBASED.add(it);
     if (typeof it.CurrentPrice === 'number') it.CurrentPrice *= factor;
     if (Array.isArray(it.PriceLogs)) it.PriceLogs.forEach(l => { if (l && typeof l.Price === 'number') l.Price *= factor; });
   };
@@ -594,10 +612,36 @@ function safeLogs(logs) {
   return logs.filter(l => l && typeof l.Price === 'number' && l.Price > 0);
 }
 function recentLogs(logs, n) { return safeLogs(logs).slice(0, n); }
+
+/* Самая свежая запись PriceLogs — ИДУЩИЕ сутки (неполные): цена в ней — рабочий сигнал,
+   а объём занижен пропорционально прошедшей доле суток (в 12:40 UTC это ~50% от вчерашнего).
+   Поэтому объём «сегодня» пересчитывается на целые сутки, а в первые ~6 часов суток, когда
+   данных слишком мало для экстраполяции, берётся вчерашний объём. */
+let DATA_TIME = Date.now(); // момент, к которому относятся данные: сейчас (живые) или время снимка (кэш)
+function dayFrac(logs) {
+  const l0 = safeLogs(logs)[0];
+  if (!l0 || !l0.Time) return 1;
+  const s = String(l0.Time);
+  const t0 = Date.parse(/(Z|[+-]\d\d:\d\d)$/.test(s) ? s : s + 'Z');
+  const f = (DATA_TIME - t0) / 86400000;
+  return (f > 0 && f < 1) ? f : 1;
+}
+function projQty(logs, i) {
+  const sl = safeLogs(logs), l = sl[i];
+  if (!l) return 0;
+  const q = l.Quantity || 0;
+  if (i !== 0) return q;
+  const f = dayFrac(logs);
+  if (f >= 1) return q;
+  if (f < 0.25) return sl[1] ? (sl[1].Quantity || q) : q;
+  return q / f;
+}
 function avgQty(logs, n) {
   const sl = recentLogs(logs, n);
   if (!sl.length) return 0;
-  return sl.reduce((a,l) => a + (l.Quantity||0), 0) / sl.length;
+  let s = 0;
+  for (let i = 0; i < sl.length; i++) s += projQty(logs, i);
+  return s / sl.length;
 }
 
 // ── FLIP model: окно 24ч (сегодня к вчера), volatility × liquidity × entry quality ──
@@ -615,8 +659,13 @@ function calcFlipScore(logs, curEx) {
   const liqFactor = Math.min(1, aq / 100);
   const range = hi - lo;
   const entryQuality = range > 0 ? Math.max(0, Math.min(1, (hi - curEx) / range)) : 0.5;
-  return volatility * liquidity * liqFactor * (0.5 + entryQuality * 0.5) * 100;
+  // «падающий нож»: ставка флипа — возврат к недавнему уровню; при обвале день к дню возврат маловероятен
+  const fall = (curEx - sl[1].Price) / sl[1].Price;
+  if (fall <= FLIP_KNIFE_HARD) return 0;
+  const knife = fall <= FLIP_KNIFE_SOFT ? 0.5 : 1;
+  return volatility * liquidity * liqFactor * (0.5 + entryQuality * 0.5) * knife * 100;
 }
+const FLIP_KNIFE_SOFT = -0.12, FLIP_KNIFE_HARD = -0.25; // падение цены к вчерашней: −12% штраф ×0.5, −25% исключение
 
 // ── INVEST model: окно 3 дня, тренд × консистентность × ликвидность ──
 function calcInvestScore(logs) {
@@ -635,11 +684,13 @@ function calcInvestScore(logs) {
     if (prices[i] > prices[i+1]) upSteps++; // новее > старее = рост
   }
   const consistency = upSteps / (prices.length - 1);
+  // демпфирование выбросов: рост выше +40% за окно учитывается лишь на 40% — всплески на тонких рынках не должны выигрывать у устойчивого роста
+  const effTrend = trend > 0.4 ? 0.4 + (trend - 0.4) * 0.4 : trend;
   const recentP = prices[0], mid = prices[Math.floor(prices.length/2)], oldP = prices[prices.length-1];
   const momentumBonus = (oldP > 0 && mid > 0)
     ? (((recentP - mid) / mid > (mid - oldP) / oldP) ? 1.3 : 1.0)
     : 1.0;
-  return trend * 100 * (0.3 + consistency * 0.7) * momentumBonus * liqFactor;
+  return effTrend * 100 * (0.3 + consistency * 0.7) * momentumBonus * liqFactor;
 }
 
 // возвращает ЧИСЛО (не строку) или null
@@ -669,13 +720,19 @@ function getFlipBids(logs, curEx) {
   const buyEx  = curEx * 0.98;
   const sellEx = Math.max(curEx * 1.03, Math.min(hi1, curEx * 1.10) * 1.01);
   const margin = buyEx > 0 ? (sellEx - buyEx) / buyEx * 100 : 0;
+  // маржа упирается в потолок (+13%), поэтому отдельно — насколько цена реально ниже недавнего уровня
+  const gap = curEx > 0 ? (hi1 - curEx) / curEx * 100 : 0;
+  const capped = hi1 > curEx * 1.10;
   const lo1 = Math.min(...prices);
   const range = hi1 - lo1;
   const eq = range > 0 ? Math.max(0, Math.min(1, (hi1 - curEx) / range)) : 0.5;
-  const eqLabel = eq >= 0.6 ? `<span class="entry-good">⬇ хорошо</span>`
+  const prev = sl[1] ? sl[1].Price : null;
+  const falling = prev ? (curEx - prev) / prev <= FLIP_KNIFE_SOFT : false;
+  const eqLabel = falling       ? `<span class="entry-bad">⚠ падает</span>`
+                : eq >= 0.6 ? `<span class="entry-good">⬇ хорошо</span>`
                 : eq >= 0.3 ? `<span class="entry-ok">→ средне</span>`
                 :             `<span class="entry-bad">⬆ высоко</span>`;
-  return { buyEx, sellEx, margin, eqLabel };
+  return { buyEx, sellEx, margin, gap, capped, eqLabel };
 }
 
 // Invest: target = cur + дневной прирост ×3, cap +50% (линейная экстраполяция врёт на параболах)
@@ -685,10 +742,11 @@ function getInvestBids(logs, curEx) {
   const prices = sl.map(l => l.Price);
   const dailyGain = (prices[0] - prices[prices.length-1]) / (prices.length - 1);
   const buyEx  = curEx * 0.98;
-  let targetEx = curEx + dailyGain * 3;
-  targetEx = Math.min(curEx * 1.5, Math.max(targetEx, curEx * 1.01));
+  const rawTarget = curEx + dailyGain * 3;
+  const targetEx = Math.min(curEx * 1.5, Math.max(rawTarget, curEx * 1.01));
   const gain = buyEx > 0 ? (targetEx - buyEx) / buyEx * 100 : 0;
-  return { buyEx, targetEx, gain };
+  const rawGain = buyEx > 0 ? (rawTarget - buyEx) / buyEx * 100 : 0;
+  return { buyEx, targetEx, gain, rawGain, capped: rawTarget > curEx * 1.5 };
 }
 
 function unitsCanBuy(buyEx) {
@@ -700,6 +758,30 @@ function marginCls(m) {
   return m >= 15 ? 'margin-good' : m >= 7 ? 'margin-ok' : 'margin-low';
 }
 const MIN_FLIP_MARGIN = 10; // %
+// порог цены кандидатов для флипа/вложений/портфеля, в div (по умолчанию 1 div; дешёвые высокообъёмные позиции — вручную)
+const MIN_DIV_OPTIONS = [1, 0.5, 0.25, 0.1];
+let minDiv = parseFloat(localStorage.getItem('poe2_min_div')) || 1;
+let allCurrencyData = [];
+function rebuildValidItems() {
+  const excludeIds = new Set(['divine','mirror', REALMS[REALM].baseApi, MID_API]);
+  const minEx = divinePrice * minDiv;
+  allValidItems = allCurrencyData
+    .filter(it => it.CurrentPrice >= minEx && safeLogs(it.PriceLogs).length >= 2
+      && !excludeIds.has(it.ApiId)
+      && !(it.ApiId.startsWith('perfect-') && it.ApiId.endsWith('-rune')))
+    .map(it => ({
+      ...it,
+      _flip: calcFlipScore(it.PriceLogs, it.CurrentPrice),
+      _inv:  calcInvestScore(it.PriceLogs),
+    }));
+}
+function setMinPrice(v) {
+  minDiv = parseFloat(v) || 1;
+  localStorage.setItem('poe2_min_div', String(minDiv));
+  rebuildValidItems();
+  renderTables();
+  renderPortfolio();
+}
 function passesFlipMargin(it) {
   const b = getFlipBids(it.PriceLogs, it.CurrentPrice);
   return b && b.margin >= MIN_FLIP_MARGIN;
@@ -743,7 +825,7 @@ function renderFlipTable(items) {
     const units = bids && showUnits ? unitsCanBuy(bids.buyEx) : null;
     const buyTxt  = bids ? fmtD(bids.buyEx)  : '—';
     const sellTxt = bids ? fmtD(bids.sellEx) : '—';
-    const margTxt = bids ? `<span class="${marginCls(bids.margin)}">${bids.margin.toFixed(0)}%</span>` : '—';
+    const margTxt = bids ? `<span class="${marginCls(bids.margin)}">${bids.margin.toFixed(0)}%</span><div class="bid-sub">${bids.capped ? 'потолок · ' : ''}ниже ср. на ${Math.max(0, bids.gap).toFixed(0)}%</div>` : '—';
     const eqTxt   = bids ? bids.eqLabel : '—';
     const unitsTd = showUnits ? `<td>${units!==null?`<span class="units-badge">× ${units}</span>`:''}</td>` : '';
     return `<tr>
@@ -778,7 +860,7 @@ function renderInvestTable(items) {
     const units = bids && showUnits ? unitsCanBuy(bids.buyEx) : null;
     const buyTxt  = bids ? fmtD(bids.buyEx)    : '—';
     const targTxt = bids ? fmtD(bids.targetEx) : '—';
-    const gainTxt = bids ? `<span class="${bids.gain>15?'margin-good':bids.gain>5?'margin-ok':'margin-low'}">${bids.gain.toFixed(0)}%</span>` : '—';
+    const gainTxt = bids ? `<span class="${bids.gain>15?'margin-good':bids.gain>5?'margin-ok':'margin-low'}">${bids.gain.toFixed(0)}%</span>${bids.capped ? `<div class="bid-sub">потолок · расчёт +${bids.rawGain.toFixed(0)}%</div>` : ''}` : '—';
     const unitsTd = showUnits ? `<td>${units!==null?`<span class="units-badge">× ${units}</span>`:''}</td>` : '';
     return `<tr>
       <td><span class="rank ${i<3?'top3':''}">${i+1}</span></td>
@@ -822,7 +904,7 @@ function renderRates(items) {
     return `<div class="rate-item">
       <div class="r-name" title="${it.Text}" style="display:flex;align-items:center;gap:5px">${icoImg(it.IconUrl,18)}<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${it.Text}</span></div>
       <div class="r-val">${toDiv(ex).toFixed(ex < divinePrice ? 3 : 2)}<span style="font-size:10px;color:var(--faint)"> div</span></div>
-      <div style="font-size:10px;color:var(--faint)">${ex.toFixed(ex < 10 ? 2 : 1)} ${U_BASE} · ${toC(ex).toFixed(1)} ${U_MID}</div>
+      <div style="font-size:10px;color:var(--faint)">${ex.toFixed(ex < 0.1 ? 3 : ex < 10 ? 2 : 1)} ${U_BASE} · ${toC(ex).toFixed(1)} ${U_MID}</div>
       <div class="r-change"><span class="${cls}">${t!==null?arr+' '+Math.abs(t).toFixed(0)+'%':''}</span></div>
     </div>`;
   }).join('');
@@ -834,6 +916,7 @@ function profitCls(profitEx) {
   return d >= 0.5 ? 'headroom-good' : d >= 0.2 ? 'headroom-ok' : 'headroom-low';
 }
 
+const CRAFT_VERIFIED_LEAGUES = ['Runes of Aldur', 'HC Runes of Aldur']; // лиги, где рецепты ниже проверены игроком
 function renderCraftBlock(runesItems, fragmentsItems, incursionItems) {
   const sections = [];
 
@@ -870,7 +953,7 @@ function renderCraftBlock(runesItems, fragmentsItems, incursionItems) {
       name: 'Simulacrum',
       icon: simFull.IconUrl,
       result: simFull,
-      recipe: `300 × Simulacrum Splinter (${simSplinter.CurrentPrice.toFixed(2)} ex × 300 = ${fmtD(costEx)})`,
+      recipe: `300 × Simulacrum Splinter (${simSplinter.CurrentPrice.toFixed(2)} ${U_BASE} × 300 = ${fmtD(costEx)})`,
       costEx, profitEx,
       note: '300 сплинтеров объединяются в Simulacrum'
     });
@@ -886,7 +969,7 @@ function renderCraftBlock(runesItems, fragmentsItems, incursionItems) {
       name: 'Breachstone',
       icon: bStone.IconUrl,
       result: bStone,
-      recipe: `300 × Breach Splinter (${bSplinter.CurrentPrice.toFixed(2)} ex × 300 = ${fmtD(costEx)})`,
+      recipe: `300 × Breach Splinter (${bSplinter.CurrentPrice.toFixed(2)} ${U_BASE} × 300 = ${fmtD(costEx)})`,
       costEx, profitEx,
       note: '300 сплинтеров объединяются в Breachstone'
     });
@@ -973,13 +1056,14 @@ function renderCraftBlock(runesItems, fragmentsItems, incursionItems) {
   return `<div class="craft-block">
     <div class="card-header coll" onclick="toggleSec('craft')">${chev('craft')}⚗️ Крафт арбитраж <span class="badge badge-craft" style="margin-left:auto">${total} рецептов</span></div>
     <div id="sec-craft" style="${secStyle('craft')}">
-      <div class="craft-note">Только проверенные рецепты. Учитывай комиссию биржи в голде и риск изменения цены за время сборки.</div>
+      <div class="craft-note">Только проверенные рецепты. Учитывай риск изменения цены за время сборки.${CRAFT_VERIFIED_LEAGUES.includes(LEAGUE) ? '' : ` <span style="color:var(--flip)">⚠ Рецепты подтверждены в «${CRAFT_VERIFIED_LEAGUES[0]}» — в «${LEAGUE}» убедись в игре, что они есть.</span>`}</div>
       ${sections.join('')}
     </div>
   </div>`;
 }
 
 /* ── Portfolio ── */
+const PF_DEPTH_SHARE = 0.15; // максимум доли среднего суточного объёма рынка на одну позицию
 let pfSplit = parseInt(localStorage.getItem('poe2_pf_split') || '50');
 let pfCur   = localStorage.getItem('poe2_pf_cur') || 'ex'; // валюта ордеров: ex | div | c
 
@@ -995,8 +1079,8 @@ function setPfCur(c) {
   renderPortfolio();
 }
 
-/* Ордеры котируем в EXALTED (целые числа — биржа принимает всегда).
-   Все предметы в выборке стоят ≥1 div ≈ 132 ex, так что округление до целого ex теряет <0.5%. */
+/* Ордеры котируем целыми числами выбранной валюты (биржа принимает только целые). Округляется ИТОГ ордера,
+   а не цена штуки: у предметов от 1 div в хаосах цена штуки — это лишь ~10 c, и её округление съело бы до ±5%. */
 function renderPortfolio() {
   const el = document.getElementById('portfolio-content');
   if (!el) return;
@@ -1020,29 +1104,34 @@ function renderPortfolio() {
 
   // Распределение по score; qty = floor(доля/цена), затем жадная докупка остатка
   // в порядке score, чтобы не оставлять свободные div без работы
+  // Цена штуки НЕ округляется (раньше округлялась до целого числа базовой валюты — в хаосах это
+  // давало до ±5% на предметах около 1 div): целыми должны быть только итоговые суммы ордера (см. quote).
+  // Позиция ограничена долей суточного объёма рынка, чтобы совет не требовал скупить половину рынка.
   function allocate(items, totalEx, scoreKey, getSell) {
     if (!items.length) return { rows: [], leftover: totalEx };
     const totalScore = items.reduce((s,it) => s + (it[scoreKey] || 1), 0);
     const rows = [];
     for (const it of items) {
-      const buyExI  = Math.max(1, Math.round(it.CurrentPrice * 0.98));
+      const buyExI  = it.CurrentPrice * 0.98;
       const sellRaw = getSell(it);
       if (!sellRaw) continue;
-      const sellExI = Math.max(buyExI + 1, Math.round(sellRaw));
+      const sellExI = Math.max(buyExI * 1.005, sellRaw);
       const share = totalEx * ((it[scoreKey] || 1) / totalScore);
-      rows.push({ it, qty: Math.floor(share / buyExI), buyExI, sellExI });
+      const maxQty = Math.max(1, Math.floor(PF_DEPTH_SHARE * avgQty(it.PriceLogs, 3)));
+      rows.push({ it, qty: Math.min(maxQty, Math.floor(share / buyExI)), buyExI, sellExI, maxQty });
     }
     let leftover = totalEx - rows.reduce((s,r) => s + r.qty * r.buyExI, 0);
-    // докупаем по кругу (rows уже отсортированы по score), пока хоть что-то влезает
+    // докупаем по кругу (rows уже отсортированы по score), пока хоть что-то влезает и не упёрлись в лимит объёма
     let progress = true;
     while (progress) {
       progress = false;
       for (const r of rows) {
-        if (r.buyExI <= leftover) { r.qty++; leftover -= r.buyExI; progress = true; }
+        if (r.qty < r.maxQty && r.buyExI <= leftover) { r.qty++; leftover -= r.buyExI; progress = true; }
       }
     }
     return {
       rows: rows.filter(r => r.qty > 0).map(r => ({ ...r,
+        depthCapped: r.qty >= r.maxQty,
         costEx: r.qty * r.buyExI,
         profitEx: r.qty * (r.sellExI - r.buyExI) })),
       leftover
@@ -1093,9 +1182,9 @@ function renderPortfolio() {
         ${icoImg(r.it.IconUrl)}
         <div class="pf-info">
           <div class="pf-name" title="${r.it.Text}">${r.it.Text}</div>
-          <div class="pf-detail" style="color:var(--buy);font-weight:600">закупка: ${r.qty} шт за ${r.buyTot} ${cur.label} (≈${unitBuyEx.toFixed(0)} ${U_BASE}/шт)</div>
-          <div class="pf-detail" style="color:var(--gain)">${modeLabel}: ${r.qty} шт за ${r.sellTot} ${cur.label} (≈${unitSellEx.toFixed(0)} ${U_BASE}/шт)</div>
-          <div class="pf-detail">итого закупка: ${fmtD(r.costEx, 1)} ≈ ${fmtC(r.costEx, 0)}${r.gridWarn ? ' <span class="grid-warn">⚠ шаг цены в ' + cur.label + ' крупнее маржи — продажа округлена вверх</span>' : ''}</div>
+          <div class="pf-detail" style="color:var(--buy);font-weight:600">закупка: ${r.qty} шт за ${r.buyTot} ${cur.label} (≈${unitBuyEx.toFixed(unitBuyEx < 10 ? 2 : 1)} ${U_BASE}/шт)</div>
+          <div class="pf-detail" style="color:var(--gain)">${modeLabel}: ${r.qty} шт за ${r.sellTot} ${cur.label} (≈${unitSellEx.toFixed(unitSellEx < 10 ? 2 : 1)} ${U_BASE}/шт)</div>
+          <div class="pf-detail">итого закупка: ${fmtD(r.costEx, 1)} ≈ ${fmtC(r.costEx, 0)}${r.gridWarn ? ' <span class="grid-warn">⚠ шаг цены в ' + cur.label + ' крупнее маржи — продажа округлена вверх</span>' : ''}${r.depthCapped ? ' <span class="grid-warn">⛔ лимит ' + Math.round(PF_DEPTH_SHARE*100) + '% суточного объёма</span>' : ''}</div>
         </div>
         <div class="pf-alloc">
           <div class="qty">× ${r.qty}</div>
@@ -1159,9 +1248,25 @@ function renderPortfolio() {
    в момент записи фиксируется курс (priceEx) — прошлые сделки не «переоцениваются».
    P&L: средняя цена закупки по предмету; реализованная = выручка − ср.закупка × мин(продано, куплено);
    нереализованная = (рыночная − ср.закупка) × остаток по живой цене poe2scout. */
+/* Миграция единиц. До перехода на хаосы базовой валютой PoE 2 были экзальты: priceEx/addPriceEx
+   хранились в экзальтах, слот «ex» = экзальты, слот «c» = хаосы. Теперь база — хаос, слот «ex» = хаос,
+   слот «c» = экзальт. Записи старше CHAOS_SWITCH_TS (и без метки v:2) пересчитываются один раз
+   по ТЕКУЩЕМУ курсу экзальт→хаос (исторический курс утрачен — это приближение). Только PoE 2. */
+const CHAOS_SWITCH_TS = Date.parse('2026-09-15T19:30:00Z');
+let RATES_READY = false;
+function migrateTrade(x) {
+  if (x.v === 2) return x;
+  if (!(x.id < CHAOS_SWITCH_TS)) return { ...x, v: 2 };           // записана уже после перехода — единицы новые
+  if (x.cur === 'ex')     return { ...x, cur: 'c',  priceEx: x.price * chaosPrice, v: 2 }; // были экзальты → «вторая» валюта
+  if (x.cur === 'c')      return { ...x, cur: 'ex', priceEx: x.price, v: 2 };              // были хаосы → базовая
+  return { ...x, priceEx: x.priceEx * chaosPrice, v: 2 };                                   // div: старую оценку в экзальтах → в хаосы
+}
 function getTrades() {
-  try { const t = JSON.parse(localStorage.getItem(tradesKey()) || '[]'); return Array.isArray(t) ? t : []; }
+  let t;
+  try { t = JSON.parse(localStorage.getItem(tradesKey()) || '[]'); if (!Array.isArray(t)) t = []; }
   catch { return []; }
+  if (REALM === 'poe2' && RATES_READY && t.some(x => x.v !== 2)) { t = t.map(migrateTrade); saveTrades(t); }
+  return t;
 }
 function saveTrades(t) { localStorage.setItem(tradesKey(), JSON.stringify(t)); }
 
@@ -1182,7 +1287,7 @@ function addTrade() {
   trades.push({
     id: Date.now(),
     ts: new Date().toLocaleString('ru', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }),
-    item, side, qty, price, cur,
+    item, side, qty, price, cur, v: 2,
     priceEx: price * curRate(cur)
   });
   saveTrades(trades);
@@ -1302,7 +1407,7 @@ function secStyle(key) { return collapsedSecs.has(key) ? 'display:none' : ''; }
 
 function switchMainTab(t) {
   mainTab = t;
-  ['market', 'price', 'pricecheck', 'help'].forEach(k => {
+  ['market', 'journal', 'price', 'pricecheck', 'help'].forEach(k => {
     const el = document.getElementById('tab-' + k);
     if (el) el.style.display = k === t ? '' : 'none';
     document.getElementById('mt-' + k)?.classList.toggle('active', k === t);
@@ -1350,7 +1455,7 @@ function adviseItem(it) {
   const yest = logs.length >= 2 ? logs[1].Price : null;
   const day = yest ? (cur - yest) / yest * 100 : null;
   const win = recentLogs(logs, 3);
-  const qNew = win[0]?.Quantity || 0, qOld = win[win.length-1]?.Quantity || 0;
+  const qNew = projQty(logs, 0), qOld = win.length ? projQty(logs, win.length - 1) : 0;
   const supply = qOld > 0 ? (qNew - qOld) / qOld * 100 : null;
   const aq = avgQty(logs, 3);
   const prices = win.map(l => l.Price);
@@ -1446,8 +1551,15 @@ function pcEvaluate() {
 
 /* Stash */
 function getStash() {
-  try { const s = JSON.parse(localStorage.getItem(stashKey()) || '[]'); return Array.isArray(s) ? s : []; }
+  let s;
+  try { s = JSON.parse(localStorage.getItem(stashKey()) || '[]'); if (!Array.isArray(s)) s = []; }
   catch { return []; }
+  // стартовая цена (Δ) хранилась в экзальтах — один раз пересчитываем в рабочую валюту (см. migrateTrade)
+  if (REALM === 'poe2' && RATES_READY && s.some(x => x.v !== 2)) {
+    s = s.map(x => x.v === 2 ? x : (x.id < CHAOS_SWITCH_TS ? { ...x, addPriceEx: x.addPriceEx * chaosPrice, v: 2 } : { ...x, v: 2 }));
+    saveStash(s);
+  }
+  return s;
 }
 function saveStash(s) { localStorage.setItem(stashKey(), JSON.stringify(s)); }
 
@@ -1460,7 +1572,7 @@ function stashAdd() {
     // повторное добавление: обновляем количество (базовая цена и дата добавления сохраняются для Δ)
     existing.qty = pcLast.qty;
   } else {
-    s.push({ id: Date.now(), name: pcLast.it.Text, qty: pcLast.qty, addPriceEx: pcLast.it.CurrentPrice, ts });
+    s.push({ id: Date.now(), name: pcLast.it.Text, qty: pcLast.qty, addPriceEx: pcLast.it.CurrentPrice, ts, v: 2 });
   }
   saveStash(s);
   renderStash();
@@ -1929,7 +2041,13 @@ async function loadSnapshotData(realm, league) {
 }
 
 /* ── JS-пароль для standalone-версии (в Cowork не запрашивается).
-   Это лишь лёгкий заслон от случайных глаз: проверка на клиенте, обходится через devtools. */
+   Это лишь лёгкий заслон от случайных глаз: проверка на клиенте, обходится через devtools.
+   В коде хранится только хеш (SHA-256 с солью), но прежний пароль остаётся в истории git. */
+const PW_SALT = 'poe2-market|', PW_HASH = '9ad9bcabb84316de8843c2adf284f20677a86faca3df25f776aed5dd7fcbac2d';
+async function sha256hex(s) {
+  const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
+  return [...new Uint8Array(b)].map(x => x.toString(16).padStart(2, '0')).join('');
+}
 (function pwGate() {
   if (window.cowork?.callMcpTool) return;
   if (sessionStorage.getItem('poe2_auth') === '1') return;
@@ -1943,9 +2061,12 @@ async function loadSnapshotData(realm, league) {
     <div id="pw-err" style="color:var(--loss);font-size:12px;height:15px"></div>`;
   document.body.appendChild(ov);
   const inp = ov.querySelector('#pw-inp');
-  inp.addEventListener('keydown', e => {
+  inp.addEventListener('keydown', async e => {
     if (e.key !== 'Enter') return;
-    if (inp.value === 'biba1') { sessionStorage.setItem('poe2_auth', '1'); ov.remove(); }
+    let ok = false;
+    try { ok = (await sha256hex(PW_SALT + inp.value)) === PW_HASH; }
+    catch (err) { ov.querySelector('#pw-err').textContent = 'нужен защищённый адрес страницы (https)'; return; }
+    if (ok) { sessionStorage.setItem('poe2_auth', '1'); ov.remove(); }
     else { ov.querySelector('#pw-err').textContent = 'неверный пароль'; inp.value = ''; }
   });
   setTimeout(() => inp.focus(), 100);
@@ -1995,6 +2116,21 @@ function onLeagueChange(v) {
       числами (кэш при этом молча заменяется, баннер «показан кэш» пропадает).
    Если не удалось ни то ни другое — показываем ошибку. Если удался хотя бы кэш — экран
    остаётся рабочим, даже если живой шаг упал (ошибка живого шага просто уходит в консоль). */
+// ручное обновление: сбрасываем кэши сессии, иначе повторная загрузка отдаёт те же объекты и «обновления» нет
+function refreshAll() {
+  jsonCache.clear();
+  leaguesCache = {};
+  snapshotFileCache = null;
+  loadAll();
+}
+function fmtSnapTime(iso) {
+  return new Date(iso).toLocaleString('ru', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
+}
+let SHOWN_LEAGUE = '';
+function setStaleBanner() {
+  const u = document.getElementById('updated');
+  if (u && usingSnapshot) u.innerHTML = `⚠ живой API недоступен · показан кэш от ${fmtSnapTime(usingSnapshot)} · ${REALMS[REALM].game} · ${SHOWN_LEAGUE}`;
+}
 async function loadAll() {
   const requestedLeague = LEAGUE; // то, что выбрал пользователь / что сохранено — кэш не должен это перетирать
   const cached = await loadSnapshotData(REALM, requestedLeague);
@@ -2057,6 +2193,7 @@ async function loadAll() {
     shown = true;
   } catch (e) {
     console.warn('loadAll: живые данные недоступны' + (shown ? ' — оставляю кэш на экране' : '') + ':', e.message);
+    if (shown) setStaleBanner(); // предупреждение — только когда живая попытка действительно провалилась
   }
 
   if (!shown) {
@@ -2076,12 +2213,29 @@ async function loadAll() {
    курсы, каталог для автоподстановки). Вызывается два раза за один loadAll():
    сначала с кэшем из data.json (мгновенно, без внешних доменов), потом — если
    получится — с живыми данными поверх (молча заменяет экран). */
+// Вторая отрисовка (живые данные поверх кэша) перестраивает #root целиком — сохраняем введённый текст, фокус и прокрутку
+function captureFormState() {
+  const root = document.getElementById('root');
+  const st = { y: window.scrollY, f: {}, active: (document.activeElement && root.contains(document.activeElement)) ? document.activeElement.id : null };
+  root.querySelectorAll('input[id],textarea[id],select[id]').forEach(el => { st.f[el.id] = el.value; });
+  return st;
+}
+function restoreFormState(st) {
+  Object.entries(st.f).forEach(([id, v]) => {
+    const el = document.getElementById(id);
+    if (el && v && (el.tagName === 'SELECT' || !el.value)) { try { el.value = v; } catch (e) {} }
+  });
+  if (st.active) document.getElementById(st.active)?.focus();
+  window.scrollTo(0, st.y);
+}
 function renderMarket(cats, uniqCats, byCategory, uniquesIn, league, categoriesResp, savedAt) {
   try {
   buildCategories(categoriesResp);
   LEAGUE = league;
+  SHOWN_LEAGUE = league;
   allUniques = uniquesIn;
   usingSnapshot = savedAt;
+  DATA_TIME = savedAt ? (Date.parse(savedAt) || Date.now()) : Date.now(); // к какому моменту относятся данные (для неполного «сегодня»)
 
   U_BASE = REALMS[REALM].baseSh; U_MID = REALMS[REALM].midSh; MID_API = REALMS[REALM].midApi;
   // API отдаёт цены в nativeApi реалма — если рабочая валюта другая (poe2: chaos), пересчитываем один раз
@@ -2092,10 +2246,11 @@ function renderMarket(cats, uniqCats, byCategory, uniquesIn, league, categoriesR
   // mid-валюта: chaos (poe2) / exalted (poe1). В базовой лиге сама base-валюта = 1.
   const midItem = currency.find(c => c.ApiId === MID_API);
   chaosPrice = (midItem && midItem.CurrentPrice > 0) ? midItem.CurrentPrice : 1;
+  RATES_READY = true;
   const ub = document.getElementById('u-base'); if (ub) ub.textContent = U_BASE;
   const um = document.getElementById('u-mid');  if (um) um.textContent = U_MID;
   const rlEl = document.getElementById('rate-label');
-  if (rlEl) rlEl.innerHTML = `1 div = <span class="divine-rate">${divinePrice.toFixed(divinePrice<10?2:1)}</span> ${U_BASE} · 1 ${U_MID} = <span class="divine-rate">${chaosPrice.toFixed(chaosPrice<10?2:1)}</span> ${U_BASE}`;
+  if (rlEl) rlEl.innerHTML = `1 div = <span class="divine-rate">${divinePrice.toFixed(divinePrice<10?2:1)}</span> ${U_BASE} · ${chaosPrice < 1 ? `1 ${U_BASE} = <span class="divine-rate">${(1/chaosPrice).toFixed(1)}</span> ${U_MID}` : `1 ${U_MID} = <span class="divine-rate">${chaosPrice.toFixed(chaosPrice<10?2:1)}</span> ${U_BASE}`}`;
   const brandEl = document.getElementById('brand');
   if (brandEl) brandEl.innerHTML = `${REALMS[REALM].emoji} ${REALMS[REALM].game} · <span id="brand-league">${LEAGUE}</span>`;
 
@@ -2107,23 +2262,12 @@ function renderMarket(cats, uniqCats, byCategory, uniquesIn, league, categoriesR
   // уникалы тоже в каталог (Price Check, журнал, стеш) — валюта приоритетнее при коллизии имён
   allUniques.forEach(it => { if (it.Text && !marketByText[it.Text]) marketByText[it.Text] = it; });
 
-  const excludeIds = new Set(['divine','mirror', REALMS[REALM].baseApi, MID_API]);
-  const minEx = divinePrice; // порог 1 div (в base-валюте)
-
-  allValidItems = allCurrency
-    .filter(it => it.CurrentPrice >= minEx && safeLogs(it.PriceLogs).length >= 2
-      && !excludeIds.has(it.ApiId)
-      && !(it.ApiId.startsWith('perfect-') && it.ApiId.endsWith('-rune')))
-    .map(it => ({
-      ...it,
-      _flip: calcFlipScore(it.PriceLogs, it.CurrentPrice),
-      _inv:  calcInvestScore(it.PriceLogs),
-    }));
+  allCurrencyData = allCurrency;
+  rebuildValidItems();
 
   const now = new Date().toLocaleTimeString('ru', { hour:'2-digit', minute:'2-digit' });
   if (usingSnapshot) {
-    const sd = new Date(usingSnapshot).toLocaleString('ru', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
-    document.getElementById('updated').innerHTML = `⚠ живой API недоступен, показан кэш от ${sd} · ${REALMS[REALM].game} · ${LEAGUE}`;
+    document.getElementById('updated').innerHTML = `кэш от ${fmtSnapTime(usingSnapshot)} · ${REALMS[REALM].game} · ${LEAGUE} · обновляю…`;
   } else {
     document.getElementById('updated').textContent = `Обновлено в ${now} · poe2scout.com · ${REALMS[REALM].game} · ${LEAGUE}`;
   }
@@ -2132,9 +2276,11 @@ function renderMarket(cats, uniqCats, byCategory, uniquesIn, league, categoriesR
   const fragmentsItems = byCategory['fragments'] || [];
   const incursionItems = byCategory['incursion'] || [];
 
+  const formState = captureFormState();
   document.getElementById('root').innerHTML = `
       <div class="main-tabs">
         <button class="main-tab ${mainTab==='market'?'active':''}" id="mt-market" onclick="switchMainTab('market')">📈 Торговая площадка</button>
+        <button class="main-tab ${mainTab==='journal'?'active':''}" id="mt-journal" onclick="switchMainTab('journal')">📒 Журнал</button>
         <button class="main-tab ${mainTab==='pricecheck'?'active':''}" id="mt-pricecheck" onclick="switchMainTab('pricecheck')">🔎 Price Check</button>
         <button class="main-tab ${mainTab==='price'?'active':''}" id="mt-price" onclick="switchMainTab('price')">📦 Stash</button>
         <button class="main-tab ${mainTab==='help'?'active':''}" id="mt-help" onclick="switchMainTab('help')">📖 Инструкция</button>
@@ -2148,17 +2294,17 @@ function renderMarket(cats, uniqCats, byCategory, uniquesIn, league, categoriesR
 
             <p style="margin-top:10px"><b>📦 Свой стеш и журнал.</b> У каждой связки <b>игра + лига + профиль</b> свой Stash и свой журнал сделок — при переключении игры/лиги/профиля показываются именно их записи. Старые данные перенесены в PoE 2 / Runes of Aldur.</p>
 
-            <p style="margin-top:10px"><b>Шапка.</b> Поля 💰 — твои свободные средства в div, ex и chaos: они суммируются по живым курсам в общий бюджет, от которого считаются портфель, фильтр «по карману» и колонка «Кол-во» в таблицах. Селектор 👤 — профили: у каждого профиля свой стеш и свой журнал сделок (бюджет и настройки общие). Чтобы создать профиль, выбери «➕ новый…», введи имя и нажми «ок».</p>
+            <p style="margin-top:10px"><b>Шапка.</b> Поля 💰 — твои свободные средства в div, c (chaos — рабочая валюта) и ex (exalted): они суммируются по живым курсам в общий бюджет, от которого считаются портфель, фильтр «по карману» и колонка «Кол-во» в таблицах. Селектор 👤 — профили: у каждого профиля свой стеш и свой журнал сделок (бюджет и настройки общие). Чтобы создать профиль, выбери «➕ новый…», введи имя и нажми «ок».</p>
 
             <p style="margin-top:10px"><b>💼 Рекомендованный портфель.</b> Делит бюджет между флипом и инвестом (слайдер), внутри корзины — пропорционально скору позиций, остаток докупается жадно. Переключатель «Ордеры в: ex / div / chaos» задаёт валюту котирования: тоталы всегда целые, как требует биржа. Строка позиции: «закупка N шт за X» — ставь buy-ордер по этим числам, «продажа/цель» — sell-ордер. Значок ⚠ значит, что шаг цены в выбранной валюте крупнее реальной маржи — такой ордер может висеть долго, переключись на ex. «Остаток» в сводке — неразменянный хвост меньше самой дешёвой позиции.</p>
 
-            <p style="margin-top:10px"><b>🔄 Топ флип.</b> Кандидаты на быструю перепродажу. Скор = волатильность за 24ч (сегодня к вчера) × ликвидность × качество точки входа. Фильтры: цена от 1 div, маржа от 10%, от 20 сделок/день. «Купить по» = текущая −2% (лимитка под рынком), «Продать по» = максимум за 24ч, но не выше +10% от текущей. «Точка входа»: ⬇ хорошо — цена у низа суточного диапазона, ⬆ высоко — у верха (покупать рискованно).</p>
+            <p style="margin-top:10px"><b>🔄 Топ флип.</b> Кандидаты на быструю перепродажу. Скор = волатильность за 24ч (сегодня к вчера) × ликвидность × качество точки входа. Фильтры: цена от 1 div, маржа от 10%, от 20 сделок/день. «Купить по» = текущая −2% (лимитка под рынком), «Продать по» = максимум за 24ч, но не выше +10% от текущей. «Точка входа»: ⬇ хорошо — цена у низа суточного диапазона, ⬆ высоко — у верха (покупать рискованно); «⚠ падает» — цена к вчерашней −12% и ниже (скор ×0.5), при −25% и ниже предмет во флип не попадает (возврат к уровню маловероятен). Маржа упирается в потолок +13%, поэтому под ней показано, насколько цена реально ниже недавнего уровня.</p>
 
-            <p style="margin-top:10px"><b>📦 Долгосрочные вложения.</b> Предметы в устойчивом росте: 3-дневный тренд × консистентность роста × ликвидность, с бонусом за ускорение. «Цель +3д» — линейная экстраполяция дневного прироста, ограничена +50% (параболы не экстраполируются честно). Вкладки категорий есть у обеих таблиц.</p>
+            <p style="margin-top:10px"><b>📦 Вложения на рост.</b> Предметы в устойчивом росте за 3 дня: тренд × консистентность роста × ликвидность, с бонусом за ускорение; рост выше +40% засчитывается лишь на 40% (против всплесков на тонких рынках). «Цель +3д» — линейная экстраполяция дневного прироста, ограничена +50%; если упёрлось в потолок, под процентом показан «сырой» расчёт. Это не долгосрочный прогноз: окно всего 3 дня. Вкладки категорий есть у обеих таблиц.</p>
 
             <p style="margin-top:10px"><b>⚗️ Крафт арбитраж.</b> Рецепты, где собрать дешевле, чем купить готовое: Origin Core (Cradle + Spark), Simulacrum и Breachstone из 300 сплинтеров, Perfect Runes (Greater + Masterwork + Orb of Extraction — цена Greater берётся с трейда вручную). Учитывай голд-комиссию биржи и время сборки.</p>
 
-            <p style="margin-top:10px"><b>📒 Журнал сделок.</b> Ручной лог покупок/продаж с автоподстановкой названия. Цена за штуку в любой валюте — курс фиксируется в момент записи. P&L: реализованный считается от средней цены закупки, нереализованный — по живой рыночной цене открытого остатка. ⚠ у строки — продано больше, чем куплено (часть выручки без базы).</p>
+            <p style="margin-top:10px"><b>📒 Журнал сделок</b> (вкладка «Журнал»). Ручной лог покупок/продаж с автоподстановкой названия. Цена за штуку в любой валюте — курс фиксируется в момент записи. P&L: реализованный считается от средней цены закупки, нереализованный — по живой рыночной цене открытого остатка. ⚠ у строки — продано больше, чем куплено (часть выручки без базы).</p>
 
             <p style="margin-top:10px"><b>🔎 Price Check (вкладка).</b> Начни вводить любую часть названия — поле ищет по подстроке среди <b>всех</b> предметов: валюта, расходники и уникалы. Выбери из подсказок — покажет курс сразу в div · ex · c, описание (для уникалов — база, iLvl, моды, флейвор; для валюты — эффект и стак), график истории цены и аналитику с рекомендацией и обоснованием. Аналитика — та же формула, что в Stash, работает автономно без внешнего AI. Кнопка «📊 разбор» в разделе уникалов открывает этот же экран на нужном предмете.</p>
 
@@ -2170,8 +2316,17 @@ function renderMarket(cats, uniqCats, byCategory, uniquesIn, league, categoriesR
 
             <p style="margin-top:10px"><b>📦 Stash.</b> После вставки предмета из буфера (Ctrl+V) он добавляется в Stash автоматически; кнопка «↻ Обновить кол-во в Stash» обновляет количество для того же предмета. Цены и рекомендации пересчитываются живыми при каждом обновлении; Δ — изменение к цене на момент добавления. Повторное добавление того же предмета обновляет количество (база для Δ сохраняется). Клик по названию раскрывает обоснование, наведение — показывает его в подсказке. Сортировка кликом по заголовку: цены и Δ — сначала по убыванию, рекомендация — по срочности продажи. Продал — убери строку ✕.</p>
 
-            <p style="margin-top:10px"><b>Ограничения.</b> История — дневные свечи, внутридневные движения не видны. Биржа берёт комиссию голдом — в расчётах её нет. Цены маленьких предметов в div округляются крупными шагами — для них котируй в ex. Все «ожидаемые прибыли» — оценки по историческим ценам, не гарантия.</p>
+            <p style="margin-top:10px"><b>Ограничения.</b> История — дневные свечи, внутридневные движения не видны. Биржа берёт комиссию голдом — в расчётах её нет. Цены маленьких предметов в div округляются крупными шагами — для них котируй в базовой валюте. Объём за неполный сегодняшний день пересчитывается на целые сутки (в первые ~6 часов суток берётся вчерашний), сама цена «сегодня» остаётся рабочим сигналом. В портфеле позиция ограничена 15% среднего суточного объёма. Порог цены кандидатов (по умолчанию от 1 div) меняется над таблицами. Все «ожидаемые прибыли» — оценки по историческим ценам, не гарантия.</p>
           </div></div>
+        </div>
+      </div>
+      <div id="tab-journal" style="display:${mainTab==='journal'?'':'none'}">
+        <div class="content">
+          <div class="tracker-block">
+            <div class="card-header">📒 Журнал сделок <span class="badge" style="background:var(--craft);color:var(--on-accent);margin-left:auto">P&L</span></div>
+            <div id="tracker-content"></div>
+            <datalist id="items-dl">${Object.keys(marketByText).sort().map(n => `<option value="${n.replace(/"/g,'&quot;')}">`).join('')}</datalist>
+          </div>
         </div>
       </div>
       <div id="tab-price" style="display:${mainTab==='price'?'':'none'}">
@@ -2210,18 +2365,18 @@ function renderMarket(cats, uniqCats, byCategory, uniquesIn, league, categoriesR
       </div>
       <div id="tab-market" style="display:${mainTab==='market'?'':'none'}">
       <div class="content">
+        <div class="toolbar">
+          <label for="min-price">Мин. цена позиции</label>
+          <select id="min-price" onchange="setMinPrice(this.value)">${MIN_DIV_OPTIONS.map(v => `<option value="${v}" ${v===minDiv?'selected':''}>от ${v} div</option>`).join('')}</select>
+          <span class="toolbar-hint">для флипа, вложений и портфеля</span>
+        </div>
         <div class="card">
           <div class="card-header rates coll" onclick="toggleSec('rates')">${chev('rates')}💰 Курсы валют <span class="badge badge-rates">div · ${U_BASE} · ${U_MID}</span></div>
           <div id="sec-rates" style="${secStyle('rates')}"><div class="rates-grid">${renderRates(currency)}</div></div>
         </div>
         <div class="portfolio-block">
-          <div class="card-header coll" onclick="toggleSec('portfolio')">${chev('portfolio')}💼 Рекомендованный портфель <span class="badge" style="background:var(--gold);color:var(--on-accent);margin-left:auto">AI</span></div>
+          <div class="card-header coll" onclick="toggleSec('portfolio')">${chev('portfolio')}💼 Рекомендованный портфель <span class="badge" style="background:var(--gold);color:var(--on-accent);margin-left:auto">расчёт</span></div>
           <div id="sec-portfolio" style="${secStyle('portfolio')}"><div id="portfolio-content"></div></div>
-        </div>
-        <div class="tracker-block">
-          <div class="card-header coll" onclick="toggleSec('tracker')">${chev('tracker')}📒 Журнал сделок <span class="badge" style="background:var(--craft);color:var(--on-accent);margin-left:auto">P&L</span></div>
-          <div id="sec-tracker" style="${secStyle('tracker')}"><div id="tracker-content"></div></div>
-          <datalist id="items-dl">${Object.keys(marketByText).sort().map(n => `<option value="${n.replace(/"/g,'&quot;')}">`).join('')}</datalist>
         </div>
         <div class="cards-row">
           <div class="card">
@@ -2232,7 +2387,7 @@ function renderMarket(cats, uniqCats, byCategory, uniquesIn, league, categoriesR
             </div>
           </div>
           <div class="card">
-            <div class="card-header invest coll" onclick="toggleSec('invest')">${chev('invest')}📦 Долгосрочные вложения <span class="badge badge-invest">10</span></div>
+            <div class="card-header invest coll" onclick="toggleSec('invest')">${chev('invest')}📦 Вложения на рост · 3д <span class="badge badge-invest">10</span></div>
             <div id="sec-invest" style="${secStyle('invest')}">
               <div class="cat-tabs" id="invest-tabs">${catTabsHtml('invest', investCat)}</div>
               <div id="invest-content"></div>
@@ -2257,6 +2412,7 @@ function renderMarket(cats, uniqCats, byCategory, uniquesIn, league, categoriesR
     renderStash();
     renderUniques();
     fillPcxList(pcxCurrent ? pcxCurrent.Text : '');
+    restoreFormState(formState);
 
   } catch(e) {
     document.getElementById('root').innerHTML = `<div class="error-msg">Ошибка: ${e.message}</div>`;
